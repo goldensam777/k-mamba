@@ -170,6 +170,7 @@ void selective_scan(real_t *output, real_t *state,
     if (!output || !state || !input || !delta || !A_bar || !B_bar || !C) {
         return;
     }
+    (void)C; (void)D; /* currently unused: readout handled outside */
     
     /* Initialize state to zero */
     memset(state, 0, state_size * sizeof(real_t));
@@ -360,6 +361,7 @@ void mamba_attach_optimizer(MambaBlock *block, const OptimConfig *optconf) {
     /* register in global registry */
     if (g_opt_n < 256) { g_opt_blocks[g_opt_n] = block; g_opt_states[g_opt_n] = s; g_opt_n++; }
     else free(s);
+    (void)optconf; /* unused for now */
 }
 
 /* free optimizer state (best-effort) */
@@ -450,6 +452,7 @@ void selective_scan_forward_store(ForwardStore *store, real_t *state,
                    const Matrix *C, real_t D,
                    size_t seq_len, size_t state_size) {
     if (!store || !state) return;
+    (void)C; (void)D;
     /* allocate storage arrays */
     store->x = (real_t *)calloc(seq_len * state_size, sizeof(real_t));
     store->A_diag = (real_t *)calloc(seq_len * state_size, sizeof(real_t));
@@ -575,6 +578,7 @@ void selective_scan_backward(ForwardStore *store, MambaBlock *block, const real_
 
 /* Backward entrypoint: compute gradients for a single batch element (batch_index unused here as we perform batch_size=1 in examples) */
 void mamba_backward(MambaBlock *block, const real_t *dY, const real_t *input, size_t batch_index) {
+    (void)batch_index;
     size_t seq_len = block->config.seq_len;
     size_t state_size = block->config.state_size;
 
