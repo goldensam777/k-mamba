@@ -1,4 +1,5 @@
 #include "mamba.h"
+#include "optimatrix_bridge.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -79,16 +80,7 @@ void matrix_print(const Matrix *m) {
 
 void matrix_vec_mult(real_t *out, const Matrix *m, const real_t *v) {
     if (!out || !m || !v || !m->data) return;
-    
-    memset(out, 0, m->rows * sizeof(real_t));
-    
-    for (size_t i = 0; i < m->rows; i++) {
-        real_t sum = 0.0;
-        for (size_t j = 0; j < m->cols; j++) {
-            sum += m->data[i * m->cols + j] * v[j];
-        }
-        out[i] = sum;
-    }
+    gemv_avx2(m->data, (real_t *)v, out, (long)m->rows, (long)m->cols);
 }
 
 void vec_add(real_t *y, const real_t *x, size_t n) {
@@ -189,8 +181,7 @@ void selective_scan(real_t *output, real_t *state,
         const real_t *u_t = &input[t * state_size];
         real_t dt_t = delta[t];
 
-        /* Compute A_diag_t and B_bar_t in parallel across state dimensions */
-#pragma omp parallel for
+        /* Compute A_diag_t and B_bar_t across state dimensions */
         for (size_t i = 0; i < state_size; i++) {
             real_t a_val = A_bar->data[i * state_size + i];
             real_t a_diag = expf(dt_t * a_val);
@@ -202,17 +193,16 @@ void selective_scan(real_t *output, real_t *state,
             }
         }
 
-        memcpy(temp_state, state, state_size * sizeof(real_t));
+        /* state = A_diag_t ⊙ state  (Hadamard AVX2) */
+        hadamard_avx2(A_diag_t, state, temp_state, (long)state_size);
 
-        /* Update state elementwise in parallel: x_t[i] = A_diag_t[i] * x_{t-1}[i] + B_bar_t[i] * u_t[i] */
-#pragma omp parallel for
-        for (size_t i = 0; i < state_size; i++) {
-            state[i] = A_diag_t[i] * temp_state[i] + B_bar_t[i] * u_t[i];
-        }
+        /* temp_state now holds A_diag_t * prev_state
+         * state = temp_state + B_bar_t ⊙ u_t */
+        hadamard_avx2(B_bar_t, (real_t *)u_t, state, (long)state_size);
+        vec_add(state, temp_state, state_size);
 
         /* Write state vector into output buffer (flattened) */
-#pragma omp parallel for
-        for (size_t i = 0; i < state_size; i++) output[t * state_size + i] = state[i];
+        memcpy(&output[t * state_size], state, state_size * sizeof(real_t));
     }
 
     free(A_diag_t); free(B_bar_t); free(temp_state);
@@ -294,18 +284,27 @@ void mamba_block_init(MambaBlock *block) {
         block->C_mat.data[i] = 1.0f / sqrtf((real_t)block->config.state_size);
     }
     
-    /* Initialize projections with small random values */
-    /* initialize W_in (state_size x dim) */
-    for (size_t i = 0; i < block->W_in.rows * block->W_in.cols; i++) {
-        block->W_in.data[i] = ((real_t)rand() / RAND_MAX - 0.5f) * 0.1f;
+    /* Xavier uniform init for W_in (state_size x dim) */
+    {
+        real_t fan_in  = (real_t)block->W_in.cols;  /* dim */
+        real_t fan_out = (real_t)block->W_in.rows;  /* state_size */
+        real_t scale   = sqrtf(6.0f / (fan_in + fan_out));
+        for (size_t i = 0; i < block->W_in.rows * block->W_in.cols; i++) {
+            block->W_in.data[i] = ((real_t)rand() / RAND_MAX * 2.0f - 1.0f) * scale;
+        }
     }
-    /* initialize W_out (dim x state_size) */
-    for (size_t i = 0; i < block->W_out.rows * block->W_out.cols; i++) {
-        block->W_out.data[i] = ((real_t)rand() / RAND_MAX - 0.5f) * 0.1f;
+    /* Xavier uniform init for W_out (dim x state_size) */
+    {
+        real_t fan_in  = (real_t)block->W_out.cols;  /* state_size */
+        real_t fan_out = (real_t)block->W_out.rows;  /* dim */
+        real_t scale   = sqrtf(6.0f / (fan_in + fan_out));
+        for (size_t i = 0; i < block->W_out.rows * block->W_out.cols; i++) {
+            block->W_out.data[i] = ((real_t)rand() / RAND_MAX * 2.0f - 1.0f) * scale;
+        }
     }
-
+    /* Small uniform init for delta_proj (1 x dim) */
     for (size_t i = 0; i < block->delta_proj.rows * block->delta_proj.cols; i++) {
-        block->delta_proj.data[i] = ((real_t)rand() / RAND_MAX - 0.5f) * 0.1f;
+        block->delta_proj.data[i] = ((real_t)rand() / RAND_MAX - 0.5f) * 0.02f;
     }
 }
 

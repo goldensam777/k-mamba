@@ -1,0 +1,3 @@
+[submodule "optimatrix"]
+	path = optimatrix
+	url = git@github.com:goldensam777/optimatrix.git
