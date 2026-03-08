@@ -18,10 +18,46 @@
 #include <math.h>
 #include <time.h>
 
-#define MAX_CORPUS_BYTES (1 << 20)   /* 1 MB */
 #define DEFAULT_DATASET  "data/conversations.txt"
 #define DEFAULT_MODEL    "lm_checkpoint.bin"
 #define DEFAULT_EPOCHS   200
+
+static char *load_corpus_bytes(const char *path, size_t *out_len) {
+    FILE *fin = fopen(path, "rb");
+    char *buf;
+    long file_size;
+    size_t nread;
+
+    if (!fin) return NULL;
+    if (fseek(fin, 0, SEEK_END) != 0) {
+        fclose(fin);
+        return NULL;
+    }
+    file_size = ftell(fin);
+    if (file_size < 0) {
+        fclose(fin);
+        return NULL;
+    }
+    rewind(fin);
+
+    buf = (char *)malloc((size_t)file_size + 1);
+    if (!buf) {
+        fclose(fin);
+        return NULL;
+    }
+
+    nread = fread(buf, 1, (size_t)file_size, fin);
+    if (nread != (size_t)file_size && ferror(fin)) {
+        free(buf);
+        fclose(fin);
+        return NULL;
+    }
+    fclose(fin);
+
+    buf[nread] = '\0';
+    if (out_len) *out_len = nread;
+    return buf;
+}
 
 int main(int argc, char *argv[]) {
     const char *dataset_path = (argc > 1) ? argv[1] : DEFAULT_DATASET;
@@ -31,36 +67,37 @@ int main(int argc, char *argv[]) {
     srand((unsigned)time(NULL));
 
     /* ---- 1. Load corpus ---- */
-    FILE *fin = fopen(dataset_path, "r");
-    if (!fin) {
+    size_t corpus_len = 0;
+    char *corpus = load_corpus_bytes(dataset_path, &corpus_len);
+    if (!corpus) {
         fprintf(stderr, "ERROR: cannot open dataset '%s'\n", dataset_path);
         return 1;
     }
-    char *corpus = (char *)malloc(MAX_CORPUS_BYTES + 1);
-    if (!corpus) { fclose(fin); return 1; }
-    size_t corpus_len = fread(corpus, 1, MAX_CORPUS_BYTES, fin);
-    corpus[corpus_len] = '\0';
-    fclose(fin);
     printf("Corpus loaded: %zu bytes from '%s'\n", corpus_len, dataset_path);
 
     /* ---- 2. Create LM ---- */
-    LMConfig cfg = {
-        .vocab_size  = 128,
-        .dim         = 64,
-        .state_size  = 32,
-        .seq_len     = 128,
-        .max_gen_len = 256
-    };
+    LMConfig cfg = lm_default_config();
     LM *lm = lm_create(&cfg);
     if (!lm) {
         fprintf(stderr, "ERROR: failed to create LM\n");
         free(corpus);
         return 1;
     }
+    printf("Model config: vocab=%zu dim=%zu state=%zu seq=%zu gen=%zu\n",
+           cfg.vocab_size, cfg.dim, cfg.state_size, cfg.seq_len, cfg.max_gen_len);
+    printf("Trainable params: %zu (~%.3fM)\n",
+           lm_num_parameters(&cfg), (double)lm_num_parameters(&cfg) / 1e6);
 
     /* Try to load existing checkpoint to resume training */
     if (lm_load(lm, model_path) == 0) {
         printf("Resumed from checkpoint '%s'\n", model_path);
+    } else {
+        FILE *ckpt = fopen(model_path, "rb");
+        if (ckpt) {
+            fclose(ckpt);
+            printf("Checkpoint '%s' ignored (missing or incompatible config)\n",
+                   model_path);
+        }
     }
 
     /* ---- 3. Optimizer config ---- */
@@ -101,8 +138,8 @@ int main(int argc, char *argv[]) {
 
         for (size_t pos = 0; pos + seq_len < corpus_len; pos += seq_len) {
             for (size_t t = 0; t < seq_len; t++) {
-                in_seq[t]  = (unsigned char)corpus[pos + t]     & 0x7F;
-                tgt_seq[t] = (unsigned char)corpus[pos + t + 1] & 0x7F;
+                in_seq[t]  = (unsigned char)corpus[pos + t];
+                tgt_seq[t] = (unsigned char)corpus[pos + t + 1];
             }
             real_t loss = lm_train_step(lm, in_seq, tgt_seq, &opt);
             total_loss += (double)loss;

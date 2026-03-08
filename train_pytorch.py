@@ -20,6 +20,8 @@ import struct
 import sys
 import os
 import math
+import time
+from contextlib import nullcontext
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,9 +29,9 @@ import torch.nn.functional as F
 # ─────────────────────────────────────────────────────────────────────────────
 # Config  (must match chat.c exactly)
 # ─────────────────────────────────────────────────────────────────────────────
-VOCAB      = 128
-DIM        = 64
-STATE_SIZE = 32
+VOCAB      = 256
+DIM        = 384
+STATE_SIZE = 1024
 SEQ_LEN    = 128
 MAX_GEN    = 256
 DT_MIN     = 0.001
@@ -75,39 +77,50 @@ class MambaBlock(nn.Module):
 
     def forward(self, x):
         """
-        x: [T, dim]  — one sequence (batch=1 for simplicity)
-        returns y: [T, dim]
+        x: [T, dim] or [B, T, dim]
+        returns y with matching batch shape
         """
-        T   = x.shape[0]
-        h   = x.new_zeros(self.state_size)
-        ys  = []
+        squeeze_batch = False
+        if x.dim() == 2:
+            x = x.unsqueeze(0)
+            squeeze_batch = True
+        elif x.dim() != 3:
+            raise ValueError(f"Expected [T, D] or [B, T, D], got {tuple(x.shape)}")
 
-        # A_bar: static, exp(A_log)
-        A_bar = self.A_log.exp()            # [state_size]
+        batch_size, seq_len, _ = x.shape
+        h = x.new_zeros(batch_size, self.state_size)
+        ys = []
 
-        for t in range(T):
-            x_t = x[t]                      # [dim]
+        # Precompute broadcast-friendly static terms.
+        A_bar = self.A_log.exp().unsqueeze(0)             # [1, state_size]
+        denom = A_bar.abs().clamp(min=1e-8)
+        B_mat = self.B_mat.unsqueeze(0)                   # [1, state_size]
+
+        for t in range(seq_len):
+            x_t = x[:, t, :]                              # [B, dim]
 
             # Controller: u = SiLU(W_in @ x)
-            u_t = F.silu(self.W_in @ x_t)  # [state_size]
+            u_t = F.silu(x_t @ self.W_in.t())            # [B, state_size]
 
             # Delta: softplus(delta_proj · x), clamped
-            delta_raw = (self.delta_proj * x_t).sum()
-            delta_t   = F.softplus(delta_raw).clamp(self.dt_min, self.dt_max)
+            delta_raw = x_t @ self.delta_proj            # [B]
+            delta_t = F.softplus(delta_raw).clamp(
+                self.dt_min, self.dt_max
+            ).unsqueeze(1)                               # [B, 1]
 
             # Discretise A and B
-            A_t   = (delta_t * A_bar).exp()            # [state_size]
-            denom = A_bar.abs().clamp(min=1e-8)
-            B_bar = (A_t - 1.0) / denom * self.B_mat   # [state_size]
+            A_t = (delta_t * A_bar).exp()                # [B, state_size]
+            B_bar = (A_t - 1.0) / denom * B_mat          # [B, state_size]
 
             # State update
-            h = A_t * h + B_bar * u_t                  # [state_size]
+            h = A_t * h + B_bar * u_t                    # [B, state_size]
 
             # Output projection
-            y_t = self.W_out @ h                        # [dim]
+            y_t = h @ self.W_out.t()                     # [B, dim]
             ys.append(y_t)
 
-        return torch.stack(ys, dim=0)   # [T, dim]
+        y = torch.stack(ys, dim=1)                       # [B, T, dim]
+        return y.squeeze(0) if squeeze_batch else y
 
 
 class LM(nn.Module):
@@ -133,9 +146,20 @@ class LM(nn.Module):
 
     def loss(self, tokens):
         """Cross-entropy loss on next-token prediction."""
-        logits = self.forward(tokens[:-1])
-        target = tokens[1:]
-        return F.cross_entropy(logits, target)
+        if tokens.dim() == 1:
+            logits = self.forward(tokens[:-1])           # [T-1, vocab]
+            target = tokens[1:]                          # [T-1]
+            return F.cross_entropy(logits, target)
+
+        if tokens.dim() != 2:
+            raise ValueError(f"Expected [T] or [B, T], got {tuple(tokens.shape)}")
+
+        logits = self.forward(tokens[:, :-1])            # [B, T-1, vocab]
+        target = tokens[:, 1:]                           # [B, T-1]
+        return F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            target.reshape(-1)
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint export  (binary format expected by lm_load() in lm.c)
@@ -191,9 +215,7 @@ def export_checkpoint(model, path):
 def load_corpus(path):
     with open(path, 'rb') as f:
         raw = f.read()
-    # Keep only printable ASCII (< 128)
-    data = bytes(b for b in raw if b < 128)
-    return torch.tensor(list(data), dtype=torch.long)
+    return torch.tensor(list(raw), dtype=torch.long)
 
 def make_windows(corpus, seq_len):
     """Slice corpus into overlapping windows of seq_len+1 tokens."""
@@ -201,21 +223,55 @@ def make_windows(corpus, seq_len):
     windows = []
     for start in range(0, len(corpus) - seq_len, step):
         windows.append(corpus[start : start + seq_len + 1])
-    return windows
+    if not windows:
+        raise ValueError(f"Corpus too short for seq_len={seq_len}")
+    return torch.stack(windows, dim=0)
+
+
+def resolve_device(device):
+    """Map auto/cpu/cuda[:N] to a torch.device with validation."""
+    requested = (device or 'auto').lower()
+    if requested == 'auto':
+        requested = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    if requested == 'cpu':
+        return torch.device('cpu')
+
+    if requested.startswith('cuda'):
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "CUDA requested but unavailable. Check the NVIDIA driver and "
+                "install a CUDA-enabled PyTorch build."
+            )
+        return torch.device(requested)
+
+    raise ValueError(f"Unsupported device '{device}'. Use auto, cpu, or cuda[:N].")
 
 def train(data_path='data/train.txt',
           ckpt_path='lm_checkpoint.bin',
           epochs=20,
           lr=3e-3,
-          device=None):
+          device=None,
+          batch_size=None,
+          amp=False):
 
-    if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = resolve_device(device)
+    if batch_size is None:
+        batch_size = 32 if device.type == 'cuda' else 1
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+
     print(f"Device: {device}")
+    if device.type == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(device)}")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    print(f"Batch size: {batch_size}")
+    print(f"AMP: {'on' if amp and device.type == 'cuda' else 'off'}")
 
     corpus  = load_corpus(data_path)
     windows = make_windows(corpus, SEQ_LEN)
-    print(f"Corpus: {len(corpus)} bytes → {len(windows)} windows")
+    print(f"Corpus: {len(corpus)} bytes -> {len(windows)} windows")
 
     model = LM().to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -223,8 +279,10 @@ def train(data_path='data/train.txt',
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr,
                                   betas=(0.9, 0.999), weight_decay=0.01)
+    steps_per_epoch = (len(windows) + batch_size - 1) // batch_size
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs * len(windows), eta_min=lr * 0.1)
+        optimizer, T_max=max(1, epochs * steps_per_epoch), eta_min=lr * 0.1)
+    scaler = torch.cuda.amp.GradScaler(enabled=amp and device.type == 'cuda')
 
     best_loss = float('inf')
 
@@ -232,29 +290,42 @@ def train(data_path='data/train.txt',
         # Shuffle windows each epoch
         idx = torch.randperm(len(windows))
         total_loss, count = 0.0, 0
+        epoch_start = time.time()
 
-        for i, wi in enumerate(idx):
-            tokens = windows[wi].to(device)
-            loss   = model.loss(tokens)
+        for step, start in enumerate(range(0, len(idx), batch_size), start=1):
+            batch_idx = idx[start : start + batch_size]
+            tokens = windows[batch_idx].to(
+                device, non_blocking=(device.type == 'cuda')
+            )
 
-            optimizer.zero_grad()
-            loss.backward()
+            optimizer.zero_grad(set_to_none=True)
+            amp_ctx = (
+                torch.autocast(device_type='cuda', dtype=torch.float16)
+                if amp and device.type == 'cuda' else nullcontext()
+            )
+            with amp_ctx:
+                loss = model.loss(tokens)
+
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             total_loss += loss.item()
             count      += 1
 
-            if (i + 1) % 100 == 0 or i == len(idx) - 1:
+            if step % 25 == 0 or step == steps_per_epoch:
                 avg = total_loss / count
                 ppl = math.exp(avg)
-                print(f"  epoch {epoch:2d}  step {i+1:5d}/{len(idx)}  "
+                print(f"  epoch {epoch:2d}  step {step:5d}/{steps_per_epoch}  "
                       f"loss={avg:.4f}  ppl={ppl:.2f}", flush=True)
 
         avg_loss = total_loss / count
         ppl      = math.exp(avg_loss)
-        print(f"Epoch {epoch:2d}  loss={avg_loss:.4f}  ppl={ppl:.2f}")
+        elapsed  = time.time() - epoch_start
+        print(f"Epoch {epoch:2d}  loss={avg_loss:.4f}  ppl={ppl:.2f}  time={elapsed:.1f}s")
 
         if avg_loss < best_loss:
             best_loss = avg_loss
@@ -266,13 +337,15 @@ def train(data_path='data/train.txt',
 
 
 if __name__ == '__main__':
-    import argparse
     p = argparse.ArgumentParser()
     p.add_argument('--data',   default='data/train.txt')
     p.add_argument('--ckpt',   default='lm_checkpoint.bin')
     p.add_argument('--epochs', type=int, default=20)
     p.add_argument('--lr',     type=float, default=3e-3)
-    p.add_argument('--device', default=None)
+    p.add_argument('--device', default='auto')
+    p.add_argument('--batch-size', type=int, default=None)
+    p.add_argument('--amp', action='store_true')
     args = p.parse_args()
 
-    train(args.data, args.ckpt, args.epochs, args.lr, args.device)
+    train(args.data, args.ckpt, args.epochs, args.lr,
+          args.device, args.batch_size, args.amp)

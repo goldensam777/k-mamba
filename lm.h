@@ -20,12 +20,18 @@
  * Configuration
  * ----------------------------------------------------------------- */
 typedef struct {
-    size_t vocab_size;   /* token vocabulary size (128 = ASCII 7-bit) */
+    size_t vocab_size;   /* token vocabulary size (256 = byte-level)  */
     size_t dim;          /* embedding + model dimension               */
     size_t state_size;   /* Mamba SSM state dimension                 */
     size_t seq_len;      /* context window (tokens)                   */
     size_t max_gen_len;  /* max tokens to generate in one call        */
 } LMConfig;
+
+/* Shared default config for the conversational LM. */
+LMConfig lm_default_config(void);
+
+/* Total trainable parameters for the current config. */
+size_t   lm_num_parameters(const LMConfig *cfg);
 
 /* -----------------------------------------------------------------
  * Embedding Table

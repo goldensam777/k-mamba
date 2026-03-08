@@ -68,6 +68,29 @@ static void adam_update(real_t *p, const real_t *g, real_t *m, real_t *v,
  * Lifecycle
  * =================================================================== */
 
+LMConfig lm_default_config(void) {
+    LMConfig cfg = {
+        .vocab_size  = 256,
+        .dim         = 384,
+        .state_size  = 1024,
+        .seq_len     = 128,
+        .max_gen_len = 256
+    };
+    return cfg;
+}
+
+size_t lm_num_parameters(const LMConfig *cfg) {
+    size_t V, D, S;
+
+    if (!cfg) return 0;
+    V = cfg->vocab_size;
+    D = cfg->dim;
+    S = cfg->state_size;
+
+    /* embedding + head + Mamba block */
+    return (V * D) + (V * D + V) + (2 * S * D + 3 * S + D);
+}
+
 LM *lm_create(const LMConfig *cfg) {
     if (!cfg) return NULL;
 
@@ -193,7 +216,7 @@ real_t lm_train_step(LM *lm,
 
     /* ---- 1. Embed input tokens ---- */
     for (size_t t = 0; t < T; t++) {
-        int tok = in_seq[t] & 0x7F;  /* clamp to ASCII */
+        int tok = (unsigned int)in_seq[t] & 0xFF;
         memcpy(embed_seq + t * D,
                lm->emb.table + tok * D,
                D * sizeof(real_t));
@@ -213,7 +236,7 @@ real_t lm_train_step(LM *lm,
 
     for (size_t t = 0; t < T; t++) {
         const real_t *h_t = mamba_out + t * D;
-        int target = tgt_seq[t] & 0x7F;
+        int target = (unsigned int)tgt_seq[t] & 0xFF;
 
         /* LM head forward: logits[k] = W[k,:] · h_t + bias[k] */
         for (size_t k = 0; k < V; k++)
@@ -270,7 +293,7 @@ real_t lm_train_step(LM *lm,
      *   Then W_in will correct via its own gradient.
      * ----------------------------------------------------------------*/
     for (size_t t = 0; t < T; t++) {
-        int tok = in_seq[t] & 0x7F;
+        int tok = (unsigned int)in_seq[t] & 0xFF;
         real_t *g_row = lm->emb.g_table + tok * D;
         const real_t *dm_t = d_mamba + t * D;
         for (size_t j = 0; j < D; j++) g_row[j] += dm_t[j];
@@ -336,16 +359,17 @@ void lm_generate(LM *lm, const char *prompt, size_t max_tokens, real_t temperatu
     }
 
     /* Fill context with prompt chars (most recent T chars, oldest first) */
+    const unsigned char *prompt_bytes = (const unsigned char *)(prompt ? prompt : "");
     size_t plen = prompt ? strlen(prompt) : 0;
     if (plen >= T) {
         /* take the last T chars */
-        const char *start = prompt + (plen - T);
-        for (size_t i = 0; i < T; i++) context[i] = (unsigned char)start[i] & 0x7F;
+        const unsigned char *start = prompt_bytes + (plen - T);
+        for (size_t i = 0; i < T; i++) context[i] = start[i];
     } else {
         /* pad left with 0, then fill */
         size_t pad = T - plen;
         for (size_t i = 0; i < pad; i++) context[i] = 0;
-        for (size_t i = 0; i < plen; i++) context[pad + i] = (unsigned char)prompt[i] & 0x7F;
+        for (size_t i = 0; i < plen; i++) context[pad + i] = prompt_bytes[i];
     }
 
     /* Generate tokens */
@@ -382,11 +406,9 @@ void lm_generate(LM *lm, const char *prompt, size_t max_tokens, real_t temperatu
             if (r < cum) { next_tok = (int)k; break; }
         }
 
-        /* Output character */
-        if (next_tok >= 32 && next_tok < 127) {
-            putchar(next_tok);
-        } else if (next_tok == '\n' || next_tok == '\t') {
-            putchar(next_tok);
+        /* Print raw UTF-8 bytes, but keep non-printable ASCII visible. */
+        if (next_tok >= 32 || next_tok == '\n' || next_tok == '\t' || next_tok == '\r') {
+            putchar((unsigned char)next_tok);
         } else {
             putchar('?');
         }
@@ -449,9 +471,17 @@ int lm_load(LM *lm, const char *path) {
         fclose(f); return -1;
     }
 
-    /* Read config (discard — assume caller created LM with matching config) */
+    /* Read config and reject incompatible checkpoints early. */
     LMConfig saved;
     if (fread(&saved, sizeof(LMConfig), 1, f) != 1) { fclose(f); return -1; }
+    if (saved.vocab_size  != lm->config.vocab_size  ||
+        saved.dim         != lm->config.dim         ||
+        saved.state_size  != lm->config.state_size  ||
+        saved.seq_len     != lm->config.seq_len     ||
+        saved.max_gen_len != lm->config.max_gen_len) {
+        fclose(f);
+        return -1;
+    }
 
     /* Blobs */
     size_t V = lm->config.vocab_size;

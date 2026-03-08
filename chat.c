@@ -26,13 +26,7 @@ int main(int argc, char *argv[]) {
     srand((unsigned)time(NULL));
 
     /* ---- 1. Create LM ---- */
-    LMConfig cfg = {
-        .vocab_size  = 128,
-        .dim         = 64,
-        .state_size  = 32,
-        .seq_len     = 128,
-        .max_gen_len = 256
-    };
+    LMConfig cfg = lm_default_config();
     LM *lm = lm_create(&cfg);
     if (!lm) {
         fprintf(stderr, "ERROR: failed to create LM\n");
@@ -48,6 +42,9 @@ int main(int argc, char *argv[]) {
     }
 
     fprintf(stderr, "BissiMamba REPL — model: %s\n", model_path);
+    fprintf(stderr, "Config: vocab=%zu dim=%zu state=%zu seq=%zu (~%.3fM params)\n",
+            cfg.vocab_size, cfg.dim, cfg.state_size, cfg.seq_len,
+            (double)lm_num_parameters(&cfg) / 1e6);
     fprintf(stderr, "Type your message and press Enter. Ctrl+D or 'quit' to exit.\n\n");
 
     /* ---- 3. REPL loop ---- */

@@ -47,6 +47,7 @@ TRAIN_EXECUTABLE = mamba_train
 MILLION_EXECUTABLE = mamba_million
 LM_TRAIN_EXECUTABLE = mamba_lm_train
 CHAT_EXECUTABLE = mamba_chat
+LM_GPU_TRAIN_SCRIPT = train_pytorch.py
 
 # Default target
 all: $(EXECUTABLE) $(ADVANCED_EXECUTABLE) $(MILLION_EXECUTABLE)
@@ -125,6 +126,9 @@ run-million: $(MILLION_EXECUTABLE)
 run-lm-train: $(LM_TRAIN_EXECUTABLE)
 	./$(LM_TRAIN_EXECUTABLE)
 
+run-lm-train-gpu:
+	python3 $(LM_GPU_TRAIN_SCRIPT) --data data/conversations.txt --ckpt lm_checkpoint_gpu.bin --epochs 5 --device auto --batch-size 32
+
 run-chat: $(CHAT_EXECUTABLE)
 	./$(CHAT_EXECUTABLE)
 
@@ -152,6 +156,7 @@ help:
 	@echo "  make run            - Build and run basic demo"
 	@echo "  make run-train      - Build and run 1M param training"
 	@echo "  make run-lm-train   - Build and train the language model"
+	@echo "  make run-lm-train-gpu - Train the LM through PyTorch on GPU when available"
 	@echo "  make run-chat       - Build and launch the interactive REPL"
 	@echo "  make repl           - Same as run-chat"
 	@echo "── CUDA (requires NVIDIA driver + CUDA toolkit) ──────────────"
@@ -165,5 +170,5 @@ help:
 	@echo "  make rebuild        - Clean and rebuild CPU targets"
 
 .PHONY: all clean run run-advanced run-train run-million run-lm-train \
+        run-lm-train-gpu \
         run-chat repl rebuild help dataset download-data train-large train-small
-
