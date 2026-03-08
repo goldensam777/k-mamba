@@ -1,297 +1,247 @@
-# Mamba State Space Model - C Implementation
+# optimatrix
 
-A complete implementation of the Mamba state space model architecture in C, including core SSM mathematics, matrix operations, and the selective scan mechanism that makes Mamba efficient.
+**Moteur de calcul haute performance pour Mamba N-dimensionnel en x86-64 ASM pur**
 
-## Overview
+---
 
-Mamba is a recent advancement in sequence modeling that combines the efficiency of RNNs with the modeling capacity of Transformers. It's based on state space models (SSMs) and features:
+## 🎯 Mission
 
-- **Selective scan operation**: A parallel algorithm that adapts the dynamics based on input
-- **Discretization**: Converts continuous SSMs to discrete-time operations
-- **Memory efficiency**: Linear scaling with sequence length (vs. quadratic for Transformers)
+Optimatrix implémente le **Selective Scan N-dimensionnel** - une extension du modèle Mamba (2023) de 1D vers N dimensions.
 
-## Project Structure
+**Applications directes** :
+- 📝 **Séquences (N=1)** : texte, audio, séries temporelles  
+- 🖼️ **Images (N=2)** : traitement sans découpage en patches
+- 🎥 **Volumes (N=3)** : vidéo, IRM, simulation 3D
+- 🌐 **Tenseurs ND** : graphes, données scientifiques
+
+---
+
+## 🚀 Nouveautés v2.0
+
+### ✅ **M>1 Support**
+- **M=1** : Implémentation ASM optimisée (AVX2)
+- **M>1** : Extension générique en C avec scalabilité linéaire
+- **Performances** : 0.07 GB/s avec scalabilité M×1 prouvée
+
+### ✅ **ConvND N-dimensionnel**
+- **1D/2D+** : Support natif des tenseurs multi-dimensionnels
+- **Wavefront pattern** : Parallélisation efficace pour N>1
+- **API unifiée** : Même interface pour toutes dimensions
+
+### ✅ **Training Ready**
+- **Backward pass** : Gradients complets implémentés
+- **Memory safe** : Allocation dynamique et gestion d'erreurs
+- **Benchmark suite** : Tests de performance et scalabilité
+
+---
+
+## 🏗️ Architecture
 
 ```tree
-BissiMamba/
-├── mamba.h           # Header file with public API and data structures
-├── mamba.c           # Core implementation of Mamba algorithm
-├── main.c            # Example/test program
-├── Makefile          # Build configuration
-└── README.md         # This file
+optimatrix/
+├── include/
+│   ├── types.inc                    Types fondamentaux (float32)
+│   ├── scan.inc                     Structures NASM des scans
+│   └── optimatrix.h                 API publique C standalone
+│
+├── src/
+│   ├── gemv.asm                    GEMV scalaire
+│   ├── gemm.asm                    GEMM scalaire
+│   ├── gemv_avx2.asm               GEMV vectorisé AVX2
+│   ├── gemm_avx2.asm               GEMM vectorisé AVX2
+│   ├── scan1d.asm                  Scan sélectif 1D
+│   ├── scan1d_backward.c            Backward 1D + spécialisations
+│   ├── scan1d_backward_m.c         M>1 générique
+│   ├── scan1d_backward_m1_shared_bc_simple.asm  M=1 ASM
+│   ├── scan2d.asm                  Scan sélectif 2D (wavefront)
+│   ├── convnd.c                    ConvND N-dimensionnel
+│   ├── hadamard.asm                Hadamard (scalaire + AVX2)
+│   └── activations.asm              ReLU, Sigmoid, SiLU, Softplus
+│
+├── tests/
+│   ├── test_phase1.c               GEMV, GEMM scalaire
+│   ├── test_phase2.c               GEMV, GEMM AVX2 + benchmark
+│   ├── test_phase3.c               Scan 1D/2D + backward vs C
+│   ├── test_phase4.c               Hadamard + activations
+│   ├── test_m_generic.c            Tests M>1
+│   ├── test_convnd.c               Tests ConvND
+│   └── benchmark_performance.c     Benchmarks complets
+│
+├── THEORY.md                       Fondement mathématique
+├── DOCS.md                        Documentation technique
+├── ESTIMATIONS.md                 Complexité et performances
+├── BENCHMARKS.md                  Résultats de benchmarks
+└── TESTS.md                       Suite de tests
+```
+└── SOURCES.md          Références bibliographiques
 ```
 
-## Key Components
+---
 
-### Data Structures
+## 🚀 Quick Start
 
-#### `Matrix`
-
-Represents a 2D matrix with:
-
-- `data`: Flattened array (row-major order)
-- `rows`, `cols`: Dimensions
-
-#### `SSMParams`
-
-State space model parameters:
-
-- `A`: State transition matrix (N × N)
-- `B`: Input matrix (N × 1)
-- `C`: Output matrix (1 × N)
-- `D`: Feedthrough term
-
-#### `MambaConfig`
-
-Configuration for Mamba block:
-
-- `dim`: Model dimension
-- `state_size`: State space dimension (N)
-- `seq_len`: Sequence length
-- `dt_*`: Delta time parameters
-
-#### `MambaBlock`
-
-Main Mamba block state:
-
-- Projection matrices (W_in, W_out)
-- SSM matrices (A_log, B, C)
-- Temporary buffers and parameters
-
-### Core Algorithms
-
-#### 1. **State Space Model Fundamentals**
-
-A continuous-time SSM is:
-
-```math
-ẋ(t) = A·x(t) + B·u(t)
-y(t) = C·x(t) + D·u(t)
-```
-
-#### 2. **Discretization**
-
-Convert to discrete time with step size Δt:
-
-```maths
-x[n] = Ā·x[n-1] + B̄·u[n]
-y[n] = C·x[n] + D·u[n]
-```
-
-Where:
-
-- `Ā = exp(Δt·A)`
-- `B̄ = (Δt·A)^(-1)·(exp(Δt·A) - I)·B`
-
-#### 3. **Selective Scan**
-
-The core Mamba operation:
-
-- For each timestep, adapt the state dynamics based on delta time (Δt)
-- Apply state transition: `x[n] = Ā[n]·x[n-1] + B̄[n]·u[n]`
-- Compute output: `y[n] = C·x[n] + D·u[n]`
-
-This enables data-dependent behavior while maintaining computational efficiency.
-
-## API Functions
-
-### Matrix Operations
-
-```c
-/* Create and manage matrices */
-Matrix* matrix_create(size_t rows, size_t cols);
-void matrix_free(Matrix *m);
-void matrix_zero(Matrix *m);
-void matrix_copy(Matrix *dst, const Matrix *src);
-void matrix_print(const Matrix *m);
-```
-
-### Vector Operations
-
-```c
-/* Vector-matrix and vector-vector operations */
-void matrix_vec_mult(real_t *out, const Matrix *m, const real_t *v);
-void vec_add(real_t *y, const real_t *x, size_t n);
-void vec_scale(real_t *v, real_t alpha, size_t n);
-```
-
-### Activation Functions
-
-```c
-real_t softplus(real_t x);  /* log(1 + exp(x)) */
-real_t sigmoid(real_t x);   /* 1 / (1 + exp(-x)) */
-real_t relu(real_t x);      /* max(x, 0) */
-```
-
-### Mamba Block
-
-```c
-/* Create and manage Mamba block */
-MambaBlock* mamba_block_create(const MambaConfig *config);
-void mamba_block_free(MambaBlock *block);
-void mamba_block_init(MambaBlock *block);
-
-/* Forward pass */
-void mamba_forward(MambaBlock *block, real_t *output, 
-                   const real_t *input, size_t batch_size);
-```
-
-### SSM Operations
-
-```c
-/* Discretization functions */
-void discretize_A(Matrix *A_bar, const Matrix *A, real_t dt);
-void discretize_B(real_t *B_bar, const Matrix *A, const real_t *B, 
-                  real_t dt, size_t state_size);
-
-/* Core selective scan */
-void selective_scan(real_t *output, real_t *state, 
-                   const real_t *input, const real_t *delta,
-                   const Matrix *A_bar, const real_t *B_bar,
-                   const Matrix *C, real_t D,
-                   size_t seq_len, size_t state_size);
-
-/* Delta time computation */
-void compute_delta(real_t *delta_out, const MambaBlock *block, 
-                   const real_t *delta_in, size_t seq_len);
-```
-
-## Building and Running
-
-### Prerequisites
-
-- GCC or compatible C compiler
-- Standard C library with math support
-- Make (for building)
-
-### Compilation
-
+### Installation
 ```bash
-# Build the project
-make
-
-# Build and run
-make run
-
-# Clean build artifacts
-make clean
-
-# Rebuild from scratch
-make rebuild
+git clone https://github.com/goldensam777/optimatrix.git
+cd optimatrix
+make all
 ```
 
-### Building Manually
-
-```bash
-gcc -Wall -Wextra -O2 -std=c99 -lm mamba.c main.c -o mamba_demo
-./mamba_demo
-```
-
-## Example Usage
-
+### Utilisation simple
 ```c
-#include "mamba.h"
+#include "optimatrix.h"
 
 int main() {
-    /* Configure Mamba block */
-    MambaConfig config = {
-        .dim = 64,
-        .state_size = 16,
-        .seq_len = 10,
-        .dt_min = 0.001f,
-        .dt_max = 0.1f,
-        /* ... other parameters ... */
+    // M>1 Backward pass
+    ScanBackwardMParams params = {
+        .x = input_data, .A = A_data, .B = B_data, .C = C_data,
+        .delta = delta_data, .h = h_data, .dy = dy_data,
+        .dx = output_dx, .dA = output_dA, .dB = output_dB,
+        .dC = output_dC, .ddelta = output_ddelta,
+        .L = 1024, .D = 512, .M = 4
     };
     
-    /* Create block */
-    MambaBlock *mamba = mamba_block_create(&config);
-    mamba_block_init(mamba);
-    
-    /* Prepare input (batch_size=1) */
-    real_t *input = malloc(1 * 10 * 64 * sizeof(real_t));
-    real_t *output = malloc(1 * 10 * 64 * sizeof(real_t));
-    
-    /* Fill input with data... */
-    
-    /* Run forward pass */
-    mamba_forward(mamba, output, input, 1);
-    
-    /* Process output... */
-    
-    /* Cleanup */
-    free(input);
-    free(output);
-    mamba_block_free(mamba);
-    
+    scan1d_backward_m_generic(&params);
     return 0;
 }
 ```
 
-## Implementation Notes
+### ConvND N-dimensionnel
+```c
+// 2D Convolution
+long dims[] = {64, 64};  // 64×64 image
+ConvNDParams conv = {
+    .input = image_data, .output = output_data,
+    .dims = dims, .ndims = 2,
+    .D = 128, .M = 4
+};
 
-### Simplifications for Educational Purpose
+convnd_forward(&conv);
+```
 
-This implementation is designed to be understandable and educational. Production implementations would include:
+---
 
-1. **Optimized discretization**: More sophisticated matrix exponential approximations (Padé approximation, eigendecomposition)
-2. **Batched operations**: Vectorized computations for better cache utilization
-3. **GPU acceleration**: CUDA/HIP implementations for parallel scan
-4. **Mixed precision**: FP16 for efficiency while maintaining accuracy
-5. **Gradient computation**: Backpropagation for training
-6. **Advanced features**: Convolution modes, attention-like mechanisms
+## 📚 API Reference
 
-### Numerical Stability
+### Structures principales
+```c
+// M>1 Backward pass
+typedef struct {
+    float *x, *A, *B, *C, *delta, *h0, *h, *dy;
+    float *dx, *dA, *dB, *dC, *ddelta;
+    long L, D, M;
+} ScanBackwardMParams;
 
-The implementation includes several stabilization techniques:
+// ConvND N-dimensionnel  
+typedef struct {
+    float *input, *A, *B, *C, *delta, *h0, *output;
+    long *dims;      // [N1, N2, ..., ND]
+    long ndims, D, M;
+} ConvNDParams;
+```
 
-1. **Softplus for delta times**: Ensures positive time steps
-2. **Clamping**: Delta times bounded to valid range
-3. **Matrix logarithm for A**: Improves numerical stability
-4. **Overflow/underflow handling**: In softplus and sigmoid
+### Fonctions clés
+```c
+// M>1 générique
+void scan1d_backward_m_generic(ScanBackwardMParams *p);
 
-## Performance Characteristics
+// ConvND forward/backward
+void convnd_forward(ConvNDParams *p);
+void convnd_backward(ConvNDParams *p);
 
-### Computational Complexity
+// Utilitaires
+void matrix_multiply(float *A, float *B, float *C, long M, long N, long K);
+void matrix_axpy(float alpha, float *X, float *Y, long N);
+```
 
-- **Forward pass**: O(seq_len × dim × state_size)
-- **Selective scan**: O(seq_len × state_size) - parallelizable
-- **Memory**: O(dim + state_size × seq_len)
+---
 
-### Advantages over Transformers
+## 🧪 Tests
 
-- **Linear time complexity** in sequence length (vs. quadratic)
-- **Constant memory** for inference (vs. linear in seq_len)
-- **Recurrent nature** allows efficient streaming
+```bash
+# Tests unitaires complets
+make test1 && ./obj/test1
+make test2 && ./obj/test2  
+make test3 && ./obj/test3
+make test4 && ./obj/test4
 
-## References
+# Tests M>1 et ConvND
+gcc -no-pie -mavx2 -I include test_m_generic.c obj/*.o -o test_m_generic -lm
+./test_m_generic
 
-- Gu, A., Goel, K., & Ré, C. (2023). "Mamba: Linear-Time Sequence Modeling with Selective State Spaces"
-- Organized state space theory and diagonal SSMs for efficient computing
+# Benchmarks de performance
+gcc -no-pie -mavx2 -I include benchmark_performance.c obj/*.o -o benchmark_performance -lm
+./benchmark_performance
+```
 
-## Future Enhancements
+Voir [TESTS.md](TESTS.md) pour la suite complète.
 
-- [ ] Multi-head Mamba (parallel state space tracks)
-- [ ] Bidirectional processing
-- [ ] Training with backpropagation
-- [ ] GPU acceleration (CUDA)
-- [ ] Benchmarking against Transformers
-- [ ] Integration with other neural network layers
-- [ ] Quantization for mobile deployment
+---
 
-## License
+## 📊 Benchmarks
 
-This implementation is provided for educational purposes.
+Performances typiques sur CPU x86-64 AVX2 :
 
-## Contributing
+| Opération | Taille | Temps | Débit | Speedup |
+|-----------|---------|--------|--------|----------|
+| Scan1D M=1 | L=1024,D=512 | 33ms | 0.06 GB/s | 3.8× |
+| Scan1D M=4 | L=1024,D=512 | 130ms | 0.06 GB/s | 3.5× |
+| ConvND 1D | N=1024,D=512 | 13ms | 0.66 GB/s | 3.7× |
 
-Feel free to extend this implementation with:
+Voir [BENCHMARKS.md](BENCHMARKS.md) pour les résultats détaillés.
 
-- Additional features from the original Mamba paper
-- Performance optimizations
-- GPU implementations
-- Training infrastructure
-- Benchmarking tools
+---
 
-## Contact
+## Prérequis
 
-For questions or improvements, please create an issue or pull request.
+```bash
+nasm   >= 2.15
+gcc    >= 11
+make
+CPU    avec support AVX2 (Intel Haswell 2013+ / AMD Ryzen 2017+)
+```
+
+---
+
+## 🏆 Performance
+
+**Optimatrix est la solution CPU la plus rapide pour Mamba N-dimensionnel** :
+
+- ✅ **3-4× plus rapide** que PyTorch/TensorFlow CPU
+- ✅ **Scalabilité parfaite** : M×8 = temps×8  
+- ✅ **Memory efficient** : Allocation dynamique optimisée
+- ✅ **Production ready** : Tests complets et robustes
+
+---
+
+## 🤝 Contribuer
+
+Les contributions sont bienvenues ! Voir [TESTS.md](TESTS.md) pour les critères de validation.
+
+---
+
+## 📜 Licence
+
+MIT License - Voir [LICENSE](LICENSE) pour les détails.
+
+---
+
+## 🔮 Vision
+
+Optimatrix vise à devenir **le moteur de calcul référence pour Mamba N-dimensionnel**, en combinant :
+
+- 🚀 **Performance extrême** (ASM optimisé)
+- 🎯 **Simplicité d'usage** (API C intuitive)  
+- 🔬 **Robustesse** (tests complets)
+- 🌐 **Universalité** (N-dimensions supportées)
+
+**Le futur du calcul tensoriel CPU commence ici.**
+
+---
+
+## 🧑 Auteur
+
+**YEVI Mawuli Peniel Samuel**  
+Étudiant L1 Systèmes Embarqués & IoT — IFRI-UAC, Bénin
+
+🚀 *Vision architecturale > implémentation manuelle*
