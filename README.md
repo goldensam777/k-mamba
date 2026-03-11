@@ -1,247 +1,112 @@
-# optimatrix
+# BissiMamba
 
-**Moteur de calcul haute performance pour Mamba N-dimensionnel en x86-64 ASM pur**
+Language model based on the Mamba State Space Model architecture, built entirely on [optimatrix](https://github.com/goldensam777/optimatrix) — a compute engine written in x86-64 assembly and C.
 
----
+No Python. No GPU. No dependencies beyond libc and libm.
 
-## 🎯 Mission
+## Architecture
 
-Optimatrix implémente le **Selective Scan N-dimensionnel** - une extension du modèle Mamba (2023) de 1D vers N dimensions.
+```plain
+Input tokens (byte-level, vocab=256)
+    |
+    v
+Embedding lookup [256 x dim]
+    |
+    v
+N x MambaBlock (optimatrix)
+    |   scan1d ASM forward
+    |   scan1d backward (ASM M=1 / C generic)
+    |   MUONCLIP optimizer
+    |
+    v
+LM Head: GEMM AVX2 [dim x 256]
+    |
+    v
+Softmax -> Cross-entropy loss
+```
 
-**Applications directes** :
-- 📝 **Séquences (N=1)** : texte, audio, séries temporelles  
-- 🖼️ **Images (N=2)** : traitement sans découpage en patches
-- 🎥 **Volumes (N=3)** : vidéo, IRM, simulation 3D
-- 🌐 **Tenseurs ND** : graphes, données scientifiques
+BissiMamba handles model orchestration: embedding, softmax, loss, checkpoint I/O, batch training loop. All heavy compute (GEMM, selective scan, convolution, activations) is delegated to optimatrix's ASM/C kernels.
 
----
+## Build
 
-## 🚀 Nouveautés v2.0
+Requires: `gcc`, `nasm`, CPU with AVX2 (Intel Haswell+ / AMD Ryzen+).
 
-### ✅ **M>1 Support**
-- **M=1** : Implémentation ASM optimisée (AVX2)
-- **M>1** : Extension générique en C avec scalabilité linéaire
-- **Performances** : 0.07 GB/s avec scalabilité M×1 prouvée
+```bash
+make          # builds bissimamba_train + bissimamba_chat
+make train    # train only
+make chat     # chat only
+make clean    # remove all artifacts
+```
 
-### ✅ **ConvND N-dimensionnel**
-- **1D/2D+** : Support natif des tenseurs multi-dimensionnels
-- **Wavefront pattern** : Parallélisation efficace pour N>1
-- **API unifiée** : Même interface pour toutes dimensions
+## Train
 
-### ✅ **Training Ready**
-- **Backward pass** : Gradients complets implémentés
-- **Memory safe** : Allocation dynamique et gestion d'erreurs
-- **Benchmark suite** : Tests de performance et scalabilité
+```bash
+./bissimamba_train <corpus> <checkpoint> <epochs> [steps_per_epoch]
 
----
+# Example
+./bissimamba_train data/conversations.txt checkpoint.bin 200
+```
 
-## 🏗️ Architecture
+- Byte-level tokenizer (no preprocessing needed — any text file works)
+- Batch training (default batch=8) with gradient averaging
+- MUONCLIP optimizer on MambaBlocks, SGD+weight decay on embedding/head
+- Auto-saves every 10 epochs, resumes from existing checkpoint
+
+### Default config
+
+| Parameter | Value |
+|-----------|-------|
+| vocab_size | 256 (byte-level) |
+| dim | 384 |
+| state_size | 1024 |
+| seq_len | 128 |
+| layers | 1 |
+| batch_size | 8 |
+| learning rate | 1e-3 |
+| optimizer | MUONCLIP (momentum=0.9, beta2=0.999, clip=1.0) |
+
+## Chat
+
+```bash
+./bissimamba_chat <checkpoint> [max_tokens] [temperature]
+
+# Example
+./bissimamba_chat checkpoint.bin 512 0.8
+```
+
+Autoregressive generation, one token at a time. Ctrl-D to quit.
+
+## Project structure
 
 ```tree
-optimatrix/
-├── include/
-│   ├── types.inc                    Types fondamentaux (float32)
-│   ├── scan.inc                     Structures NASM des scans
-│   └── optimatrix.h                 API publique C standalone
-│
-├── src/
-│   ├── gemv.asm                    GEMV scalaire
-│   ├── gemm.asm                    GEMM scalaire
-│   ├── gemv_avx2.asm               GEMV vectorisé AVX2
-│   ├── gemm_avx2.asm               GEMM vectorisé AVX2
-│   ├── scan1d.asm                  Scan sélectif 1D
-│   ├── scan1d_backward.c            Backward 1D + spécialisations
-│   ├── scan1d_backward_m.c         M>1 générique
-│   ├── scan1d_backward_m1_shared_bc_simple.asm  M=1 ASM
-│   ├── scan2d.asm                  Scan sélectif 2D (wavefront)
-│   ├── convnd.c                    ConvND N-dimensionnel
-│   ├── hadamard.asm                Hadamard (scalaire + AVX2)
-│   └── activations.asm              ReLU, Sigmoid, SiLU, Softplus
-│
-├── tests/
-│   ├── test_phase1.c               GEMV, GEMM scalaire
-│   ├── test_phase2.c               GEMV, GEMM AVX2 + benchmark
-│   ├── test_phase3.c               Scan 1D/2D + backward vs C
-│   ├── test_phase4.c               Hadamard + activations
-│   ├── test_m_generic.c            Tests M>1
-│   ├── test_convnd.c               Tests ConvND
-│   └── benchmark_performance.c     Benchmarks complets
-│
-├── THEORY.md                       Fondement mathématique
-├── DOCS.md                        Documentation technique
-├── ESTIMATIONS.md                 Complexité et performances
-├── BENCHMARKS.md                  Résultats de benchmarks
-└── TESTS.md                       Suite de tests
-```
-└── SOURCES.md          Références bibliographiques
+BissiMamba/
+├── bissimamba.h        # Model definition (BissiMamba, BissiMambaConfig)
+├── bissimamba.c        # Forward, backward, batch training, checkpoint I/O
+├── train_lm.c          # Training CLI
+├── chat.c              # Inference CLI
+├── Makefile            # Builds optimatrix then BissiMamba
+├── data/               # Training corpora
+│   ├── conversations.txt
+│   └── train.txt
+└── optimatrix/         # Compute engine (git submodule)
+    ├── src/            # ASM kernels + C orchestration
+    ├── include/        # optimatrix.h public API
+    └── tests/          # Kernel test suite (phase 1-5)
 ```
 
----
+## What comes from where
 
-## 🚀 Quick Start
+| BissiMamba (model code) | optimatrix (compute code) |
+|------------------------|--------------------------|
+| Embedding (memcpy) | GEMM/GEMV AVX2 |
+| Softmax, cross-entropy | Selective scan 1D/2D (ASM) |
+| Batch training loop | Scan backward (ASM + C) |
+| Checkpoint save/load | MambaBlock forward/backward |
+| CLI (train, chat) | MUONCLIP optimizer |
+| | Activations (SiLU, Sigmoid, ...) |
+| | Conv1D/ConvND |
+| | Hadamard product |
 
-### Installation
-```bash
-git clone https://github.com/goldensam777/optimatrix.git
-cd optimatrix
-make all
-```
+## License
 
-### Utilisation simple
-```c
-#include "optimatrix.h"
-
-int main() {
-    // M>1 Backward pass
-    ScanBackwardMParams params = {
-        .x = input_data, .A = A_data, .B = B_data, .C = C_data,
-        .delta = delta_data, .h = h_data, .dy = dy_data,
-        .dx = output_dx, .dA = output_dA, .dB = output_dB,
-        .dC = output_dC, .ddelta = output_ddelta,
-        .L = 1024, .D = 512, .M = 4
-    };
-    
-    scan1d_backward_m_generic(&params);
-    return 0;
-}
-```
-
-### ConvND N-dimensionnel
-```c
-// 2D Convolution
-long dims[] = {64, 64};  // 64×64 image
-ConvNDParams conv = {
-    .input = image_data, .output = output_data,
-    .dims = dims, .ndims = 2,
-    .D = 128, .M = 4
-};
-
-convnd_forward(&conv);
-```
-
----
-
-## 📚 API Reference
-
-### Structures principales
-```c
-// M>1 Backward pass
-typedef struct {
-    float *x, *A, *B, *C, *delta, *h0, *h, *dy;
-    float *dx, *dA, *dB, *dC, *ddelta;
-    long L, D, M;
-} ScanBackwardMParams;
-
-// ConvND N-dimensionnel  
-typedef struct {
-    float *input, *A, *B, *C, *delta, *h0, *output;
-    long *dims;      // [N1, N2, ..., ND]
-    long ndims, D, M;
-} ConvNDParams;
-```
-
-### Fonctions clés
-```c
-// M>1 générique
-void scan1d_backward_m_generic(ScanBackwardMParams *p);
-
-// ConvND forward/backward
-void convnd_forward(ConvNDParams *p);
-void convnd_backward(ConvNDParams *p);
-
-// Utilitaires
-void matrix_multiply(float *A, float *B, float *C, long M, long N, long K);
-void matrix_axpy(float alpha, float *X, float *Y, long N);
-```
-
----
-
-## 🧪 Tests
-
-```bash
-# Tests unitaires complets
-make test1 && ./obj/test1
-make test2 && ./obj/test2  
-make test3 && ./obj/test3
-make test4 && ./obj/test4
-
-# Tests M>1 et ConvND
-gcc -no-pie -mavx2 -I include test_m_generic.c obj/*.o -o test_m_generic -lm
-./test_m_generic
-
-# Benchmarks de performance
-gcc -no-pie -mavx2 -I include benchmark_performance.c obj/*.o -o benchmark_performance -lm
-./benchmark_performance
-```
-
-Voir [TESTS.md](TESTS.md) pour la suite complète.
-
----
-
-## 📊 Benchmarks
-
-Performances typiques sur CPU x86-64 AVX2 :
-
-| Opération | Taille | Temps | Débit | Speedup |
-|-----------|---------|--------|--------|----------|
-| Scan1D M=1 | L=1024,D=512 | 33ms | 0.06 GB/s | 3.8× |
-| Scan1D M=4 | L=1024,D=512 | 130ms | 0.06 GB/s | 3.5× |
-| ConvND 1D | N=1024,D=512 | 13ms | 0.66 GB/s | 3.7× |
-
-Voir [BENCHMARKS.md](BENCHMARKS.md) pour les résultats détaillés.
-
----
-
-## Prérequis
-
-```bash
-nasm   >= 2.15
-gcc    >= 11
-make
-CPU    avec support AVX2 (Intel Haswell 2013+ / AMD Ryzen 2017+)
-```
-
----
-
-## 🏆 Performance
-
-**Optimatrix est la solution CPU la plus rapide pour Mamba N-dimensionnel** :
-
-- ✅ **3-4× plus rapide** que PyTorch/TensorFlow CPU
-- ✅ **Scalabilité parfaite** : M×8 = temps×8  
-- ✅ **Memory efficient** : Allocation dynamique optimisée
-- ✅ **Production ready** : Tests complets et robustes
-
----
-
-## 🤝 Contribuer
-
-Les contributions sont bienvenues ! Voir [TESTS.md](TESTS.md) pour les critères de validation.
-
----
-
-## 📜 Licence
-
-MIT License - Voir [LICENSE](LICENSE) pour les détails.
-
----
-
-## 🔮 Vision
-
-Optimatrix vise à devenir **le moteur de calcul référence pour Mamba N-dimensionnel**, en combinant :
-
-- 🚀 **Performance extrême** (ASM optimisé)
-- 🎯 **Simplicité d'usage** (API C intuitive)  
-- 🔬 **Robustesse** (tests complets)
-- 🌐 **Universalité** (N-dimensions supportées)
-
-**Le futur du calcul tensoriel CPU commence ici.**
-
----
-
-## 🧑 Auteur
-
-**YEVI Mawuli Peniel Samuel**  
-Étudiant L1 Systèmes Embarqués & IoT — IFRI-UAC, Bénin
-
-🚀 *Vision architecturale > implémentation manuelle*
+MIT

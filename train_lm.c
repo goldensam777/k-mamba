@@ -1,184 +1,112 @@
-/* train_lm.c — Character-level language model training on a text corpus.
- *
- * Usage: ./mamba_lm_train [dataset] [model_out] [epochs]
- *   dataset   : path to text file (default: data/conversations.txt)
- *   model_out : path to checkpoint file (default: lm_checkpoint.bin)
- *   epochs    : number of training epochs (default: 200)
- *
- * The entire corpus is read into memory and trained using a sliding
- * window of seq_len characters (stride = seq_len, non-overlapping).
- * Loss and perplexity are printed each epoch.
- */
+#include "bissimamba.h"
 
-#include "mamba.h"
-#include "lm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
-#include <sys/time.h>
-#include <time.h>
 
-#define DEFAULT_DATASET  "data/conversations.txt"
-#define DEFAULT_MODEL    "lm_checkpoint.bin"
-#define DEFAULT_EPOCHS   200
+static unsigned char *read_entire_file(const char *path, size_t *n_out) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long n = ftell(f);
+    if (n < 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
 
-static double wall_seconds(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-}
-
-static char *load_corpus_bytes(const char *path, size_t *out_len) {
-    FILE *fin = fopen(path, "rb");
-    char *buf;
-    long file_size;
-    size_t nread;
-
-    if (!fin) return NULL;
-    if (fseek(fin, 0, SEEK_END) != 0) {
-        fclose(fin);
-        return NULL;
-    }
-    file_size = ftell(fin);
-    if (file_size < 0) {
-        fclose(fin);
-        return NULL;
-    }
-    rewind(fin);
-
-    buf = (char *)malloc((size_t)file_size + 1);
-    if (!buf) {
-        fclose(fin);
-        return NULL;
-    }
-
-    nread = fread(buf, 1, (size_t)file_size, fin);
-    if (nread != (size_t)file_size && ferror(fin)) {
-        free(buf);
-        fclose(fin);
-        return NULL;
-    }
-    fclose(fin);
-
-    buf[nread] = '\0';
-    if (out_len) *out_len = nread;
+    unsigned char *buf = (unsigned char *)malloc((size_t)n);
+    if (!buf) { fclose(f); return NULL; }
+    if (fread(buf, 1, (size_t)n, f) != (size_t)n) { free(buf); fclose(f); return NULL; }
+    fclose(f);
+    *n_out = (size_t)n;
     return buf;
 }
 
-int main(int argc, char *argv[]) {
-    const char *dataset_path = (argc > 1) ? argv[1] : DEFAULT_DATASET;
-    const char *model_path   = (argc > 2) ? argv[2] : DEFAULT_MODEL;
-    int         num_epochs   = (argc > 3) ? atoi(argv[3]) : DEFAULT_EPOCHS;
+int main(int argc, char **argv) {
+    const char *corpus_path = (argc > 1) ? argv[1] : "data/conversations.txt";
+    const char *ckpt_path   = (argc > 2) ? argv[2] : "checkpoint.bin";
+    int epochs              = (argc > 3) ? atoi(argv[3]) : 200;
+    long steps_override     = (argc > 4) ? atol(argv[4]) : 0;
 
-    srand((unsigned)time(NULL));
+    printf("corpus: %s\n", corpus_path);
+    printf("ckpt:   %s\n", ckpt_path);
+    printf("epochs: %d\n", epochs);
 
-    /* ---- 1. Load corpus ---- */
-    size_t corpus_len = 0;
-    char *corpus = load_corpus_bytes(dataset_path, &corpus_len);
-    if (!corpus) {
-        fprintf(stderr, "ERROR: cannot open dataset '%s'\n", dataset_path);
+    size_t nbytes = 0;
+    unsigned char *data = read_entire_file(corpus_path, &nbytes);
+    if (!data || nbytes < 1024) {
+        fprintf(stderr, "Failed to read corpus or corpus too small\n");
+        free(data);
         return 1;
     }
-    printf("Corpus loaded: %zu bytes from '%s'\n", corpus_len, dataset_path);
 
-    /* ---- 2. Create LM ---- */
-    LMConfig cfg = lm_default_config();
-    LM *lm = lm_create(&cfg);
-    if (!lm) {
-        fprintf(stderr, "ERROR: failed to create LM\n");
-        free(corpus);
-        return 1;
-    }
-    printf("Model config: vocab=%zu dim=%zu state=%zu seq=%zu gen=%zu\n",
-           cfg.vocab_size, cfg.dim, cfg.state_size, cfg.seq_len, cfg.max_gen_len);
-    printf("Trainable params: %zu (~%.3fM)\n",
-           lm_num_parameters(&cfg), (double)lm_num_parameters(&cfg) / 1e6);
-
-    /* Try to load existing checkpoint to resume training */
-    if (lm_load(lm, model_path) == 0) {
-        printf("Resumed from checkpoint '%s'\n", model_path);
-    } else {
-        FILE *ckpt = fopen(model_path, "rb");
-        if (ckpt) {
-            fclose(ckpt);
-            printf("Checkpoint '%s' ignored (missing or incompatible config)\n",
-                   model_path);
-        }
-    }
-
-    /* ---- 3. Optimizer config ---- */
-    OptimConfig opt = {
-        .lr          = 1e-3f,
-        .mu          = 0.9f,
-        .beta2       = 0.999f,
-        .eps         = 1e-8f,
-        .clip_norm   = 1.0f,
-        .weight_decay= 1e-5f
+    BissiMambaConfig cfg = {
+        .vocab_size  = 256,
+        .dim         = 384,
+        .state_size  = 1024,
+        .seq_len     = 128,
+        .n_layers    = 1,
+        .dt_scale    = 1.0f,
+        .dt_min      = 0.001f,
+        .dt_max      = 0.1f
     };
 
-    size_t seq_len = cfg.seq_len;
-    size_t n_windows = 0;
-    if (corpus_len > seq_len + 1)
-        n_windows = (corpus_len - 1) / seq_len;
+    MBOptimConfig opt = {
+        .lr           = 1e-3f,
+        .mu           = 0.9f,
+        .beta2        = 0.999f,
+        .eps          = 1e-8f,
+        .clip_norm    = 1.0f,
+        .weight_decay = 1e-5f
+    };
 
-    if (n_windows == 0) {
-        fprintf(stderr, "ERROR: corpus too short (need > %zu chars)\n", seq_len + 1);
-        lm_free(lm);
-        free(corpus);
-        return 1;
+    BissiMamba *m = NULL;
+    {
+        FILE *probe = fopen(ckpt_path, "rb");
+        if (probe) {
+            fclose(probe);
+            m = bissimamba_load(ckpt_path, 1, &opt, 1e-3f, 1e-5f);
+            if (m) printf("Loaded checkpoint\n");
+        }
     }
-    printf("Windows per epoch: %zu  (seq_len=%zu)\n", n_windows, seq_len);
-    printf("Training for %d epochs...\n\n", num_epochs);
-
-    int *in_seq  = (int *)malloc(seq_len * sizeof(int));
-    int *tgt_seq = (int *)malloc(seq_len * sizeof(int));
-    if (!in_seq || !tgt_seq) {
-        lm_free(lm); free(corpus); free(in_seq); free(tgt_seq);
-        return 1;
+    if (!m) {
+        m = bissimamba_create(&cfg);
+        if (!m) { fprintf(stderr, "Failed to create model\n"); free(data); return 1; }
+        bissimamba_init(m, 1234);
+        bissimamba_enable_training(m, &opt, 1e-3f, 1e-5f);
+        printf("Initialized new model\n");
     }
 
-    /* ---- 4. Training loop ---- */
-    double train_start = wall_seconds();
-    for (int epoch = 0; epoch < num_epochs; epoch++) {
-        double total_loss = 0.0;
-        size_t count      = 0;
-        double epoch_start = wall_seconds();
+    size_t batch_size = 8;
+    size_t Lp1 = cfg.seq_len + 1;
+    uint8_t *batch = (uint8_t *)malloc(batch_size * Lp1);
+    if (!batch) { fprintf(stderr, "OOM\n"); bissimamba_free(m); free(data); return 1; }
 
-        for (size_t pos = 0; pos + seq_len < corpus_len; pos += seq_len) {
-            for (size_t t = 0; t < seq_len; t++) {
-                in_seq[t]  = (unsigned char)corpus[pos + t];
-                tgt_seq[t] = (unsigned char)corpus[pos + t + 1];
+    size_t steps_per_epoch = 200;
+    if (nbytes > (cfg.seq_len + 2) * 1000) steps_per_epoch = 1000;
+    if (steps_override > 0) steps_per_epoch = (size_t)steps_override;
+
+    printf("batch=%zu, steps/epoch=%zu\n", batch_size, steps_per_epoch);
+
+    for (int e = 0; e < epochs; e++) {
+        double avg = 0.0;
+        for (size_t s = 0; s < steps_per_epoch; s++) {
+            for (size_t b = 0; b < batch_size; b++) {
+                size_t start = (size_t)rand() % (nbytes - Lp1);
+                memcpy(&batch[b * Lp1], &data[start], Lp1);
             }
-            real_t loss = lm_train_step(lm, in_seq, tgt_seq, &opt);
-            total_loss += (double)loss;
-            count++;
+            float loss = bissimamba_train_batch(m, batch, batch_size);
+            avg += (double)loss;
         }
+        avg /= (double)steps_per_epoch;
+        printf("epoch %d/%d loss=%.4f\n", e + 1, epochs, (float)avg);
 
-        double avg_loss = (count > 0) ? total_loss / (double)count : 0.0;
-        double ppl      = exp(avg_loss);
-        double elapsed  = wall_seconds() - epoch_start;
-        double win_per_s = (elapsed > 0.0) ? (double)count / elapsed : 0.0;
-        double tok_per_s = (elapsed > 0.0) ? (double)(count * seq_len) / elapsed : 0.0;
-        printf("Epoch %3d  loss=%.4f  ppl=%.2f  time=%.2fs  win/s=%.2f  tok/s=%.2f\n",
-               epoch, avg_loss, ppl, elapsed, win_per_s, tok_per_s);
-        fflush(stdout);
-
-        /* Checkpoint every 10 epochs */
-        if ((epoch + 1) % 10 == 0) {
-            if (lm_save(lm, model_path) == 0)
-                printf("  -> checkpoint saved to '%s'\n", model_path);
+        if ((e + 1) % 10 == 0) {
+            if (bissimamba_save(m, ckpt_path) == 0) printf("saved\n");
         }
     }
 
-    /* Final save */
-    lm_save(lm, model_path);
-    printf("\nTraining complete in %.2fs. Model saved to '%s'\n",
-           wall_seconds() - train_start, model_path);
-
-    free(in_seq);
-    free(tgt_seq);
-    free(corpus);
-    lm_free(lm);
+    bissimamba_save(m, ckpt_path);
+    bissimamba_free(m);
+    free(batch);
+    free(data);
     return 0;
 }

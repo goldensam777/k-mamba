@@ -45,3 +45,10 @@ mamba_train
 
 # OS
 Thumbs.db
+
+# Python venv
+bissi_mamba/
+__pycache__/
+
+#Almost personal
+CLAUDE.md

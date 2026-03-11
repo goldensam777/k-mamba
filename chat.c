@@ -1,92 +1,100 @@
-/* chat.c — Interactive REPL for BissiMamba.
- *
- * Usage: ./mamba_chat [model_path]
- *   model_path : path to lm_checkpoint.bin (default: lm_checkpoint.bin)
- *
- * Loads the model once, then loops:
- *   You> <prompt>
- *   Bot> <generation>
- * Type "quit" or "exit", or send EOF (Ctrl+D) to exit.
- */
+#include "bissimamba.h"
 
-#include "mamba.h"
-#include "lm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <math.h>
 
-#define DEFAULT_MODEL    "lm_checkpoint.bin"
-#define MAX_PROMPT_LEN   1024
-#define GENERATION_TEMP  0.8f
+static int sample_from_probs(const float *probs, size_t n, float r) {
+    float c = 0.0f;
+    for (size_t i = 0; i < n; i++) {
+        c += probs[i];
+        if (r <= c) return (int)i;
+    }
+    return (int)(n - 1);
+}
 
-int main(int argc, char *argv[]) {
-    const char *model_path = (argc > 1) ? argv[1] : DEFAULT_MODEL;
+static void softmax_temp(float *probs, const float *logits, size_t n, float temp) {
+    float maxv = logits[0] / temp;
+    for (size_t i = 1; i < n; i++) {
+        float v = logits[i] / temp;
+        if (v > maxv) maxv = v;
+    }
+    float sum = 0.0f;
+    for (size_t i = 0; i < n; i++) {
+        float e = expf(logits[i] / temp - maxv);
+        probs[i] = e;
+        sum += e;
+    }
+    float inv = 1.0f / sum;
+    for (size_t i = 0; i < n; i++) probs[i] *= inv;
+}
 
-    srand((unsigned)time(NULL));
+int main(int argc, char **argv) {
+    const char *ckpt_path = (argc > 1) ? argv[1] : "checkpoint.bin";
+    int max_new = (argc > 2) ? atoi(argv[2]) : 512;
+    float temp = (argc > 3) ? (float)atof(argv[3]) : 1.0f;
 
-    /* ---- 1. Create LM ---- */
-    LMConfig cfg = lm_default_config();
-    LM *lm = lm_create(&cfg);
-    if (!lm) {
-        fprintf(stderr, "ERROR: failed to create LM\n");
+    MBOptimConfig dummy = {0};
+    BissiMamba *m = bissimamba_load(ckpt_path, 0, &dummy, 0.0f, 0.0f);
+    if (!m) {
+        fprintf(stderr, "Failed to load checkpoint: %s\n", ckpt_path);
         return 1;
     }
 
-    /* ---- 2. Load checkpoint ---- */
-    if (lm_load(lm, model_path) != 0) {
-        fprintf(stderr, "ERROR: cannot load model from '%s'\n", model_path);
-        fprintf(stderr, "       Train first: make mamba_lm_train && ./mamba_lm_train\n");
-        lm_free(lm);
+    size_t V = m->cfg.vocab_size;
+    size_t L = m->cfg.seq_len;
+    float *logits = (float *)calloc(L * V, sizeof(float));
+    float *probs  = (float *)calloc(V, sizeof(float));
+    uint8_t *ctx  = (uint8_t *)calloc(L, 1);
+    if (!logits || !probs || !ctx) {
+        fprintf(stderr, "OOM\n");
+        free(logits); free(probs); free(ctx);
+        bissimamba_free(m);
         return 1;
     }
 
-    fprintf(stderr, "BissiMamba REPL — model: %s\n", model_path);
-    fprintf(stderr, "Config: vocab=%zu dim=%zu state=%zu seq=%zu (~%.3fM params)\n",
-            cfg.vocab_size, cfg.dim, cfg.state_size, cfg.seq_len,
-            (double)lm_num_parameters(&cfg) / 1e6);
-    fprintf(stderr, "Type your message and press Enter. Ctrl+D or 'quit' to exit.\n\n");
+    printf("BissiMamba — %s (seq=%zu, dim=%zu, layers=%zu)\n",
+           ckpt_path, m->cfg.seq_len, m->cfg.dim, m->cfg.n_layers);
+    printf("Ctrl-D to quit.\n");
 
-    /* ---- 3. REPL loop ---- */
-    char prompt[MAX_PROMPT_LEN];
-    char context_buf[MAX_PROMPT_LEN + 64];
+    char line[4096];
+    while (1) {
+        printf("\n> ");
+        fflush(stdout);
+        if (!fgets(line, sizeof(line), stdin)) break;
 
-    for (;;) {
-        /* Print user prompt */
-        fprintf(stdout, "You> ");
+        size_t n = strlen(line);
+        if (n && line[n - 1] == '\n') line[--n] = 0;
+
+        memset(ctx, 0, L);
+        size_t start = (n > L) ? (n - L) : 0;
+        size_t clen = n - start;
+        for (size_t i = 0; i < clen; i++) ctx[L - clen + i] = (uint8_t)line[start + i];
+
+        fwrite(line, 1, n, stdout);
         fflush(stdout);
 
-        /* Read one line */
-        if (!fgets(prompt, sizeof(prompt), stdin)) {
-            /* EOF (Ctrl+D) */
-            fprintf(stdout, "\n");
-            break;
+        for (int step = 0; step < max_new; step++) {
+            if (bissimamba_forward(m, ctx, logits) != 0) break;
+            const float *last = &logits[(L - 1) * V];
+            softmax_temp(probs, last, V, temp);
+            float r = (float)rand() / (float)RAND_MAX;
+            int tok = sample_from_probs(probs, V, r);
+
+            memmove(ctx, ctx + 1, L - 1);
+            ctx[L - 1] = (uint8_t)tok;
+            putchar(tok);
+            fflush(stdout);
+
+            if (tok == '\n') break;
         }
-
-        /* Strip trailing newline/CR */
-        size_t plen = strlen(prompt);
-        while (plen > 0 && (prompt[plen-1] == '\n' || prompt[plen-1] == '\r'))
-            prompt[--plen] = '\0';
-
-        /* Skip empty lines */
-        if (plen == 0) continue;
-
-        /* Exit commands */
-        if (strcmp(prompt, "quit") == 0 || strcmp(prompt, "exit") == 0)
-            break;
-
-        /* Build context and generate */
-        snprintf(context_buf, sizeof(context_buf), "Human: %s\nBot: ", prompt);
-
-        fprintf(stdout, "Bot> ");
-        fflush(stdout);
-        lm_generate(lm, context_buf, cfg.max_gen_len, GENERATION_TEMP);
-        fprintf(stdout, "\n");
-        fflush(stdout);
+        printf("\n");
     }
 
-    /* ---- 4. Cleanup ---- */
-    lm_free(lm);
-    fprintf(stderr, "Bye.\n");
+    free(logits);
+    free(probs);
+    free(ctx);
+    bissimamba_free(m);
     return 0;
 }
