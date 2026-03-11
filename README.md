@@ -107,6 +107,10 @@ BissiMamba/
 | | Conv1D/ConvND |
 | | Hadamard product |
 
+## Author
+
+**Samuel YEVI** ([@goldensam777](https://github.com/goldensam777))
+
 ## License
 
 MIT
