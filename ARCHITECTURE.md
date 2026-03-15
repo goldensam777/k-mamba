@@ -29,21 +29,38 @@ Cette séparation n'est pas technique seulement — elle est **philosophique**. 
 ## Structure de k-mamba
 
 ```
-k-mamba/ — Les Volontés (orchestration)
+k-mamba/ — Les Volontés (orchestration du modèle Mamba)
 │
 ├── include/kmamba.h
-│   └── API publique : KMamba, KMambaConfig
+│   └── API publique : KMamba, KMambaConfig, MambaBlock
 │       kmamba_create/init/free
 │       kmamba_forward/backward/train
 │       kmamba_save/load
 │
-├── src/kmamba.c
-│   └── Implémentation :
-│       ├── Embedding lookup (memcpy ligne de table)
-│       ├── Softmax stable (exp(x-max)/sum)
-│       ├── Cross-entropy (-log(p_target))
-│       ├── Training loop (accumulation gradients)
-│       └── Checkpoint I/O (format binaire "KMAMBA")
+├── src/
+│   ├── kmamba.c
+│   │   └── Implémentation principale :
+│   │       ├── Embedding lookup (memcpy ligne de table)
+│   │       ├── Softmax stable (exp(x-max)/sum)
+│   │       ├── Cross-entropy (-log(p_target))
+│   │       ├── Training loop (accumulation gradients)
+│   │       └── Checkpoint I/O (format binaire "KMAMBA")
+│   │
+│   ├── mamba_block.c
+│   │   └── Bloc SSM complet avec MUON :
+│   │       ├── Forward 1D/2D (appelle optimatrix)
+│   │       ├── Backward (appelle optimatrix)
+│   │       ├── Optimiseur MUONCLIP
+│   │       └── Gestion des buffers
+│   │
+│   └── convnd.c
+│       └── Convolution ND (logique modèle) :
+│           ├── Appelle conv1d_avx2 (optimatrix)
+│           ├── Gestion des dépendances ND
+│           └── Workspace pour backward
+│
+├── optimatrix/ (submodule)
+│   └── Moteur de calcul — voir section dédiée
 │
 └── CMakeLists.txt
     └── Export k-mamba::k-mamba avec find_package support
@@ -54,25 +71,29 @@ k-mamba/ — Les Volontés (orchestration)
 ## Structure d'optimatrix
 
 ```
-optimatrix/ — La Puissance (kernels ASM AVX2)
+optimatrix/ — La Puissance (kernels génériques réutilisables)
 │
 ├── include/optimatrix.h
-│   └── API calcul :
+│   └── API calcul générique :
 │       ├── GEMM/GEMV (AVX2)
 │       ├── Conv1D depthwise (AVX2)
-│       ├── ConvND separable (forward + backward ND)
 │       ├── Scan 1D/2D (ASM wavefront)
 │       ├── Activations (SiLU, Sigmoid, Softplus)
 │       ├── Hadamard (AVX2)
-│       └── MambaBlock + MUONCLIP optimizer
+│       └── Structures pour scans (forward + backward)
 │
 └── src/
-    ├── gemm_avx2.asm      ← GEMM tiling + FMA vectorisé
-    ├── scan1d.asm         ← Scan selectif 1D forward
-    ├── scan2d.asm         ← Scan 2D wavefront anti-diagonal
-    ├── conv1d_avx2.asm    ← Conv1D depthwise causale
-    ├── mamba_block.c      ← Orchestration MambaBlock
-    └── ...
+    ├── gemm.asm, gemm_avx2.asm      ← GEMM scalaire + AVX2
+    ├── gemv.asm, gemv_avx2.asm      ← GEMV scalaire + AVX2
+    ├── hadamard.asm                  ← Produit élément par élément
+    ├── activations.asm               ← SiLU, Sigmoid, Softplus (AVX2)
+    ├── conv1d_avx2.asm              ← Conv1D depthwise causale
+    ├── scan1d.asm                   ← Scan sélectif 1D forward
+    ├── scan2d.asm                   ← Scan sélectif 2D wavefront
+    ├── scan1d_backward.c            ← Backward 1D complet
+    ├── scan1d_backward_m.c          ← Backward M>1 générique
+    ├── scan1d_backward_m1_shared_bc.asm      ← Optimisation M=1
+    └── scan1d_backward_m1_shared_bc_simple.asm  ← Version simplifiée
 ```
 
 ---
@@ -84,25 +105,32 @@ Appel utilisateur
        │
        ▼
 ┌─────────────────────────────────────┐
-│ k-mamba : kmamba_forward()         │
-│  1. embed_lookup() — memcpy        │
-│  2. Pour chaque layer :             │
-│     mamba_block_forward() ───────┐  │
-│  3. gemm_avx2(head, hidden)      │  │
-│       └──> optimatrix            │  │
-└──────────────────────────────────┼──┘
+│ k-mamba : kmamba_forward()          │
+│ 1. embed_lookup() — memcpy        │
+│ 2. Pour chaque layer :            │
+│    mamba_block_forward()          │
+│ 3. gemm_avx2(head, hidden)        │
+│       └──> optimatrix              │
+└─────────────────────────────────────┘
                                    │
        ▼                           │
-┌──────────────────────────────────┼──┐
-│ optimatrix : mamba_block_forward()│  │
-│  1. gemm_avx2(W_in, x)            │  │
-│  2. silu_f32_avx2()               │  │
-│  3. gemm_avx2(delta_proj, x)      │  │
-│  4. softplus + clamp              │  │
-│  5. scan1d() or scan2d() ─────────┘  │
-│       (ASM kernels)                 │
-│  6. gemm_avx2(W_out, h)            │
-└───────────────────────────────────────┘
+┌─────────────────────────────────┐
+│ optimatrix (appelé par k-mamba)│
+│ 1. gemv_avx2(W_in, x)               │
+│ 2. silu_f32()                          │
+│ 3. gemv_avx2(delta_proj, x)         │
+│ 4. softplus + clamp                 │
+│ 5. scan1d() or scan2d()             │
+│ 6. gemv_avx2(W_out, h)              │
+│    └──> retourne à k-mamba       │
+└─────────────────────────────────┘
+                                   │
+       ▼                           │
+┌─────────────────────────────────────┐
+│ k-mamba : suite du forward        │
+│ 4. softmax() + cross-entropy()   │
+│ 5. retourne logits/loss          │
+└─────────────────────────────────────┘
 ```
 
 ---
@@ -110,33 +138,33 @@ Appel utilisateur
 ## Cycle de vie d'une backward pass
 
 ```
-Appel utilisateur
-       │
-       ▼
+      Appel utilisateur
+            │
+            ▼
 ┌─────────────────────────────────────┐
-│ k-mamba : kmamba_train_step()        │
-│  1. Forward avec sauvegarde activ.   │
-│  2. Cross-entropy loss               │
-│  3. dlogits = softmax - one_hot      │
-│  4. d_hidden = dlogits @ head^T    │
-│  5. Pour chaque layer (reverse) :    │
-│     mamba_backward() ────────────┐   │
-│  6. Gradients embedding (scatter)    │
-│  7. Optimizer step (MUONCLIP) ───┐   │
-└──────────────────────────────────┼───┘
+│ k-mamba : kmamba_train_step()       │
+│  1. Forward avec sauvegarde activ.  │
+│  2. Cross-entropy loss              │
+│  3. dlogits = softmax - one_hot     │
+│  4. d_hidden = dlogits @ head^T     │
+│  5. Pour chaque layer (reverse) :   │
+│     mamba_backward()                │
+│  6. Gradients embedding (scatter)   │
+│  7. Optimizer step (MUONCLIP)       │
+└─────────────────────────────────────┘
                                    │
-       ▼                           │
+       ▼                           
 ┌──────────────────────────────────┼───┐
 │ optimatrix : mamba_backward()    │   │
-│  1. Recompute forward (store)    │   │
-│  2. Backprop W_out (GEMM)        │   │
-│  3. scan1d_backward() (ASM/C) ───┘   │
-│  4. Backprop SiLU                  │
-│  5. Backprop W_in (GEMM)           │
-│  6. Accumulation gradients         │
+│  1. Recompute forward (store)        │
+│  2. Backprop W_out (GEMM)            │
+│  3. scan1d_backward() (ASM/C)        │
+│  4. Backprop SiLU                    │
+│  5. Backprop W_in (GEMM)             │
+│  6. Accumulation gradients           │
 └───────────────────────────────────────┘
 
-       ▼
+                     ▼
 ┌─────────────────────────────────────┐
 │ optimatrix : mamba_optimizer_step()  │
 │  (MUONCLIP via Newton-Schulz)        │

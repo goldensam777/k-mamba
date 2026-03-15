@@ -1,0 +1,14 @@
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/k-mamba.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/edit_cache.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/rebuild_cache.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/list_install_components.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/install.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/install/local.dir
+/home/samuel-yevi/Dev/k-mamba/build/CMakeFiles/install/strip.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/optimatrix.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/edit_cache.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/rebuild_cache.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/list_install_components.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/install.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/install/local.dir
+/home/samuel-yevi/Dev/k-mamba/build/optimatrix/CMakeFiles/install/strip.dir

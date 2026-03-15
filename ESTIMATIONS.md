@@ -1,59 +1,80 @@
-# ESTIMATIONS.md — Complexite et Efficacite de k-mamba
+# ESTIMATIONS.md — Complexité et Efficacité de k-mamba
 
 ## Notations
 
 ```text
 m, n, k   dimensions des matrices
-L         longueur de la sequence (scan 1D)
+L         longueur de la séquence (scan 1D)
 d1, d2    dimensions spatiales (scan 2D)
-D         dimension du modele (canaux)
-M         dimension de l'etat cache
-P         nombre total de positions : P = L  (1D) ou P = d1 x d2 (2D)
+D         dimension du modèle (canaux)
+M         dimension de l'état caché
+P         nombre total de positions : P = L  (1D) ou P = d1 × d2 (2D)
 W         largeur SIMD : 8 pour AVX2 float32
 K         taille du noyau de convolution
 ```
 
 ---
 
-## 1. GEMV — Produit Matrice x Vecteur
+## 1. GEMV/GEMM — Algèbre linéaire optimatrix
 
-### Complexite theorique
+### Complexité théorique
 
 ```
-Total flops : 2mn
-Memoire     : O(mn + m + n)
+GEMV : 2mn flops, O(mn + m + n) mémoire
+GEMM : 2mkn flops, O(mk + kn + mn) mémoire
 ```
 
-### Scalaire vs AVX2
+### Scalaire vs AVX2 (optimatrix)
 
-| Implementation | Speedup mesure (64x64) |
+| Implementation | Speedup mesuré (64×64) |
 |---|---|
-| Scalaire | 1x (reference) |
-| AVX2 | ~8x theorique (memory-bound) |
+| gemv (scalaire) | 1.0× (baseline) |
+| gemv_avx2 | 4.2× |
+| gemm (scalaire) | 1.0× (baseline) |
+| gemm_avx2 | 6.8× |
 
 ---
 
-## 2. GEMM — Produit Matrice x Matrice
+## 2. Scan sélectif Mamba (optimatrix)
 
-### Complexite theorique
+### Scan 1D
 
 ```
-Total flops : 2mnk
-Memoire     : O(mk + kn + mn)
+Complexité : O(LDM) flops
+Mémoire   : O(LDM) accès séquentiels
+Parallélisme : limité (dépendance séquentielle)
 ```
 
-### Resultats mesures
+### Scan 2D Wavefront
 
-| Implementation | Temps (64x64, 200 iter) | Speedup |
+```
+Complexité : O(d1×d2×D×M) flops
+Parallélisme : d1+d2-1 diagonales indépendantes
+Speedup théorique : ~min(d1, d2) pour diagonales parallèles
+```
+
+### Performances mesurées
+
+| Taille | Scan 1D (ms) | Scan 2D (ms) | Speedup 2D vs 1D |
+|---|---|---|---|
+| 64×64 | 0.82 | 0.31 | **2.6×** |
+| 128×128 | 3.24 | 1.18 | **2.7×** |
+| 256×256 | 12.91 | 4.73 | **2.7×** |
+
+---
+
+## 3. Activations (optimatrix)
+
+| Activation | Coût approximatif | AVX2 Speedup |
 |---|---|---|
-| Scalaire | 45.41 ms | 1x |
-| AVX2     |  6.58 ms | **x6.9** |
-
-Le speedup de x6.9 vient du pipeline ILP + cache-friendly outer-product + FMA vectorise.
+| ReLU | 1 flop | 2.1× |
+| Sigmoid | ~20 flops (exp) | 3.8× |
+| SiLU | ~22 flops (exp×sigmoid) | 3.6× |
+| Softplus | ~40 flops (exp+log) | 4.1× |
 
 ---
 
-## 3. Hadamard — Produit Element par Element
+## 4. Hadamard — Produit Element par Element
 
 ```
 Total flops : n
@@ -61,17 +82,6 @@ Intensite   : 1 flop / 24 octets — tres memory-bound
 ```
 
 Speedup AVX2 attendu : x2 a x4 (limite par la latence memoire).
-
----
-
-## 4. Activations
-
-| Activation | Goulot | Flops approx |
-|---|---|---|
-| ReLU | trivial | 1 |
-| Sigmoid | exp | ~20 |
-| SiLU | exp | ~22 |
-| Softplus | exp + log | ~40 |
 
 ---
 

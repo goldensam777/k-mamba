@@ -27,8 +27,11 @@ Architecture dualiste : **k-mamba** orchestre les Volontés (logique modèle), *
 
 Extension native de Mamba 1D vers N dimensions via **recurrence simultanée** :
 
-```
+```math
 h(n) = Σ_{k=1}^{N} A_k · h(n − e_k) + B(n) · x(n)
+```
+
+```math
 y(n) = C(n) · h(n)
 ```
 
@@ -37,16 +40,17 @@ y(n) = C(n) · h(n)
 - **Scan ND** : DAG N-dimensionnel complet
 
 Différence avec l'état de l'art :
+
 - **VMamba** (2024) : 4 scans 1D dans 4 directions (pas de vraie 2D)
 - **Mamba-ND** (Li et al.) : scans 1D alternés par couche
 - **k-mamba** : récurrence **native ND**, pas d'approximation séquentielle
 
 ### 2. Architecture Volontés/Puissance
 
-```
+```plan
 k-mamba/              ← Volontés (intentions, orchestration)
 ├── Embedding lookup
-├── Stack MambaBlocks  
+├── Stack MambaBlocks
 ├── Checkpoint I/O
 └── Training loop
 
@@ -62,6 +66,7 @@ Séparation philosophique : la logique modèle (triviale, 5-10 lignes) reste en 
 ### 3. MUONCLIP natif CPU
 
 Implémentation C/ASM de l'optimiseur MUON (arXiv:2502.16982, Moonshot AI) :
+
 - Newton-Schulz orthogonalisation (5 itérations)
 - Momentum Nesterov + gradient clipping
 - Weight decay découplé
@@ -86,26 +91,32 @@ Cadre conceptuel original : les systèmes doivent opérer par **intentions** (Vo
 
 ## Structure
 
-```
-k-mamba/
+```plain
+k-mamba/                              ← Bibliothèque principale (modèle Mamba)
 ├── include/
-│   └── kmamba.h              # API publique
+│   └── kmamba.h                   # API publique du modèle
 ├── src/
-│   └── kmamba.c              # Orchestration (forward, backward, checkpoint)
-├── optimatrix/               # Submodule — kernels ASM AVX2
-│   ├── include/optimatrix.h  # API calcul
+│   ├── kmamba.c                   # Orchestration du modèle
+│   ├── mamba_block.c              # Bloc SSM complet avec MUON
+│   └── convnd.c                  # Convolution ND (logique modèle)
+├── optimatrix/                    # Submodule git — moteur de calcul
+│   ├── include/optimatrix.h       # API des kernels
 │   └── src/
-│       ├── gemm_avx2.asm
-│       ├── scan1d.asm
-│       ├── scan2d.asm
-│       ├── conv1d_avx2.asm
-│       └── mamba_block.c
+│       ├── activations.asm         # SiLU, Sigmoid, Softplus (AVX2)
+│       ├── conv1d_avx2.asm        # Noyau Conv1D depthwise
+│       ├── gemm*.asm, gemv*.asm   # Multiplication matricielle
+│       ├── hadamard.asm           # Produit élément par élément
+│       ├── scan1d.asm             # Scan sélectif 1D
+│       ├── scan2d.asm             # Scan sélectif 2D wavefront
+│       ├── scan1d_backward.c      # Rétropropagation scan 1D
+│       ├── scan1d_backward_m.c    # Scan 1D backward M-générique
+│       └── scan1d_backward_*.asm # Kernels ASM optimisés
 ├── cmake/
 │   └── k-mambaConfig.cmake.in
 ├── CMakeLists.txt
-├── THEORY.md                 # Fondement mathématique Mamba-ND
-├── ESTIMATIONS.md            # Complexité et benchmarks
-└── ARCHITECTURE.md           # Séparation Volontés/Puissance
+├── THEORY.md                     # Fondement mathématique Mamba-ND
+├── ESTIMATIONS.md                # Complexité et benchmarks
+└── ARCHITECTURE.md               # Philosophie Volontés/Puissance
 ```
 
 ---
@@ -198,19 +209,26 @@ kmamba_free(m);
 
 ### Séparation des responsabilités
 
-| k-mamba (Volontés) | optimatrix (Puissance) |
-|-------------------|------------------------|
-| Embedding (memcpy) | GEMM/GEMV AVX2 |
-| Softmax, cross-entropy | Scan selectif 1D/2D |
-| Batch training loop | Scan backward ASM+C |
-| Checkpoint I/O | MambaBlock forward/backward |
-| LM head projection | MUONCLIP optimizer |
-| | ConvND separable |
-| | Activations (SiLU, etc.) |
+| k-mamba (Volontés — logique modèle) | optimatrix (Puissance — calcul générique) |
+|-----------------------------------|----------------------------------------|
+| **Responsabilité** : implémentation du modèle Mamba (SSM, orchestration) | **Responsabilité** : primitives de calcul haute performance |
+| **Dépendance** : utilise optimatrix pour les kernels | **Dépendance** : aucune (pur ASM/C) |
+| **Fichiers** : | **Fichiers** : |
+| └─ `kmamba.c` — orchestration du modèle (forward/backward, checkpoint) | └─ `activations.asm` — SiLU, Sigmoid, Softplus (AVX2) |
+| └─ `mamba_block.c` — bloc SSM complet (avec Muon) | └─ `conv1d_avx2.asm` — noyau Conv1D depthwise |
+| └─ `convnd.c` — convolution ND (appelle le noyau 1D) | └─ `gemm.asm`, `gemv.asm` — multiplication matricielle |
+| | └─ `scan1d.asm`, `scan2d.asm` — scans sélectifs |
+| | └─ `scan1d_backward*.c/.asm` — rétropropagation des scans |
+| **Opérations** : | **Opérations** : |
+| └─ Embedding lookup (`memcpy`) | └─ GEMM/GEMV (AVX2) |
+| └─ Softmax, cross-entropy | └─ Scan sélectif 1D/2D (ASM) |
+| └─ Training loop (boucles sur batch) | └─ ConvND séparable (C) |
+| └─ Checkpoint I/O (format binaire) | └─ MUONCLIP optimizer (C) |
+| └─ LM head projection | └─ Activations vectorisées (AVX2) |
 
 ### Pipeline MambaBlock
 
-```
+```plain
 input [seq_len × dim]
     │
     ▼

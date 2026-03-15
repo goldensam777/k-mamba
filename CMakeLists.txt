@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.18)
-project(k-mamba VERSION 0.1.0 LANGUAGES C)
+project(k-mamba VERSION 0.1.0 LANGUAGES C ASM_NASM)
 
 # Options
 option(KMAMBA_BUILD_TESTS "Build tests" OFF)
 option(KMAMBA_BUILD_EXAMPLES "Build examples" OFF)
+
+# NASM flags
+set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <INCLUDES> <FLAGS> -o <OBJECT> <SOURCE>")
+set(CMAKE_ASM_NASM_FLAGS "-f elf64 -O3")
 
 # Find optimatrix submodule
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/optimatrix/CMakeLists.txt)
@@ -12,10 +16,14 @@ endif()
 
 add_subdirectory(optimatrix)
 
-# Library target
-add_library(k-mamba STATIC
+# Library target - Mamba orchestration only
+set(KMAMBA_C_SRCS
     src/kmamba.c
+    src/mamba_block.c
+    src/convnd.c
 )
+
+add_library(k-mamba STATIC ${KMAMBA_C_SRCS})
 
 add_library(k-mamba::k-mamba ALIAS k-mamba)
 

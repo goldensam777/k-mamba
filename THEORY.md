@@ -4,7 +4,7 @@
 
 ### Le modele continu (SSM classique)
 
-```
+```math
 x'(t) = A * x(t) + B * u(t)
 y(t)  = C * x(t)
 ```
@@ -17,23 +17,40 @@ y(t)  = C * x(t)
 
 ### Discretisation (ZOH)
 
+```math
+
+A_b = exp(delta * A)
 ```
-A_bar = exp(delta * A)
+
+```math
 B_bar = (delta * A)^{-1} * (exp(delta * A) - I) * delta * B
+
 ```
 
 Recurrence discrete :
-```
+
+```math
 h_t = A_bar * h_{t-1} + B_bar * x_t
-y_t = C * h_t
+
+```
+
+```math
+    y_t = C * h_t
 ```
 
 ### Selectivite (Mamba)
 
 B, C, et delta **dependent de l'entree** :
-```
+
+```math
 B_t = f_B(x_t)
+```
+
+```math
 C_t = f_C(x_t)
+```
+
+```math
 delta_t = softplus(f_delta(x_t))
 ```
 
@@ -42,7 +59,8 @@ Le modele choisit **quoi retenir** a chaque pas — d'ou "selective scan".
 ### Le Conv1D dans Mamba
 
 Avant le scan, une Conv1D capture le contexte local :
-```
+
+```math
 x' = Conv1D(x)
 ```
 
@@ -61,7 +79,7 @@ le scan ND fait evoluer l'etat dans un espace a N dimensions.
 
 Pour un tenseur `X in R^{d_1 x d_2 x ... x d_N x D}` :
 
-```
+```math
 h(n) = sum_{k=1}^{N} A_k * h(n - e_k)  +  B(n) * x(n)
 y(n) = C(n) * h(n)
 ```
@@ -73,7 +91,8 @@ ou `e_k` est le vecteur unite dans la dimension k.
 En 1D : `h_1 -> h_2 -> h_3 -> h_4`
 
 En 2D :
-```
+
+```math
 h(i-1,j) \
             -> h(i,j)
 h(i,j-1) /
@@ -83,8 +102,8 @@ En ND : chaque point depend de N predecesseurs — DAG N-dimensionnel.
 
 ### ConvND separable avant le scan
 
-```
-X' = ConvND(X)    chaine de Conv1D axe par axe
+```plain
+  X' = ConvND(X)   chaine de Conv1D axe par axe
 ```
 
 Capture le contexte local dans toutes les directions
@@ -104,7 +123,7 @@ haut-bas, bas-haut). C'est 4 x Mamba1D, pas un vrai Mamba2D.
 **Mamba-ND (Li et al., 2024)** : scans 1D alternes le long de chaque axe
 par couche. Toujours des scans 1D reordonnes, pas une recurrence native ND.
 
-**k-mamba** : recurrence **simultanee** dans toutes les dimensions.
+**k-mamba** : recurrence **simultanée** dans toutes les dimensions.
 L'etat a la position (i,j) depend de h(i-1,j) ET h(i,j-1) au meme pas.
 L'ordonnancement wavefront (diagonales anti) resout les dependances
 tout en exposant du parallelisme intra-diagonale.
@@ -115,7 +134,7 @@ tout en exposant du parallelisme intra-diagonale.
 
 Le MambaBlock dans k-mamba implemente le pipeline Mamba de bout en bout :
 
-```
+```text
 input [seq_len x dim]
   |
   v
@@ -147,7 +166,7 @@ pour W_in, W_out, A_log, B, C, delta_proj. L'optimiseur MUONCLIP
 
 ## 5. Ce que k-mamba fournit
 
-```
+```plain
 1. Orchestration ND   — stack MambaBlocks, embedding, LM head
 2. Checkpoint I/O     — format binaire avec magic "KMAMBA"
 3. Training loop      — batch training avec accumulation gradients
@@ -158,10 +177,40 @@ k-mamba orchestre, optimatrix calcule.
 
 ---
 
+## 6. Architecture Volontés/Puissance
+
+### k-mamba (Volontés)
+Responsable de l'orchestration du modèle Mamba :
+- Création et gestion des MambaBlocks
+- Embedding lookup et LM head
+- Softmax, cross-entropy, loss computation
+- Training loop sur batches
+- Checkpoint I/O (format binaire "KMAMBA")
+- Appel des kernels optimatrix
+
+### optimatrix (Puissance)
+Fournit les primitives de calcul haute performance :
+- Kernels algébriques (GEMM/GEMV, Hadamard)
+- Activations vectorisées (SiLU, Sigmoid, Softplus)
+- Scans sélectifs (1D, 2D wavefront)
+- Convolution 1D depthwise
+- Rétropropagation complète des scans
+
+Cette séparation permet :
+- **Réutilisabilité** : optimatrix peut servir à d'autres architectures
+- **Clarté** : logique modèle (k-mamba) séparée du calcul (optimatrix)
+- **Performance** : kernels optimisés ASM AVX2 sans compromis
+
+---
+
 ## References
 
 - Gu & Dao (2023). Mamba: Linear-Time Sequence Modeling with Selective State Spaces.
+
 - Liu et al. (2024). VMamba: Visual State Space Models.
+
 - Li et al. (2024). Mamba-ND: Selective State Space Modeling for Multi-Dimensional Data.
+
 - Kosson et al. (2024). Newton-Schulz orthogonalization (cited in MUON paper).
+
 - Moonshot AI (2025). MUON optimizer (arXiv:2502.16982).
