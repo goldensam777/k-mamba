@@ -74,6 +74,22 @@ install(TARGETS k-mamba
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+if(KMAMBA_BUILD_CPU)
+    install(TARGETS k-mamba-cpu
+        EXPORT k-mamba-targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
+
+if(KMAMBA_BUILD_CUDA)
+    install(TARGETS k-mamba-cuda
+        EXPORT k-mamba-targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
+
 install(DIRECTORY include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

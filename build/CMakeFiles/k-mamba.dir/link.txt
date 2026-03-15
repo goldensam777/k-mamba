@@ -1,2 +1,0 @@
-/usr/bin/ar qc libk-mamba.a "CMakeFiles/k-mamba.dir/src/kmamba.c.o" "CMakeFiles/k-mamba.dir/src/mamba_block.c.o" "CMakeFiles/k-mamba.dir/src/convnd.c.o"
-/usr/bin/ranlib libk-mamba.a

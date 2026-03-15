@@ -63,6 +63,16 @@ typedef struct {
 } MambaBlock;
 
 /* ============================================================================
+ * Optimizer Types
+ * ============================================================================ */
+typedef enum {
+    OPTIMIZER_ADAM_CLIP,    /* Current implementation (AdamW + gradient clipping) */
+    OPTIMIZER_MUON,          /* MUON with Newton-Schulz (future implementation) */
+    OPTIMIZER_SGD,           /* Vanilla SGD with momentum */
+    OPTIMIZER_ADAMW          /* Standard AdamW */
+} OptimizerType;
+
+/* ============================================================================
  * Optimizer Configuration
  * ============================================================================ */
 typedef struct {
@@ -75,9 +85,10 @@ typedef struct {
 } MBOptimConfig;
 
 /* ============================================================================
- * Optimizer State (MUONCLIP)
+ * Optimizer State (modular)
  * ============================================================================ */
 typedef struct {
+    OptimizerType type;
     size_t step;
     
     /* Gradients */
@@ -88,7 +99,7 @@ typedef struct {
     float *g_C_mat;
     float *g_delta_proj;
     
-    /* Moments */
+    /* Moments (used by ADAM-based optimizers) */
     float *m_W_in;
     float *v_W_in;
     float *m_W_out;
@@ -153,7 +164,7 @@ void mamba_block_forward_2d(MambaBlock *block, float *output, const float *input
                             size_t d1, size_t d2);
 
 /* Training functions */
-void mamba_attach_optimizer(MambaBlock *block, const MBOptimConfig *optconf);
+void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptimConfig *optconf);
 void mamba_free_optimizer(MambaBlock *block);
 void mamba_zero_grads(MambaBlock *block);
 void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf);
@@ -188,6 +199,9 @@ void        kmamba_free(KMamba *m);
 int  kmamba_init(KMamba *m, uint32_t seed);
 int  kmamba_enable_training(KMamba *m, const MBOptimConfig *opt_blocks,
                                 float lr_embed_head, float weight_decay);
+int  kmamba_enable_training_with_optimizer(KMamba *m, OptimizerType opt_type,
+                                          const MBOptimConfig *opt_blocks,
+                                          float lr_embed_head, float weight_decay);
 
 int         kmamba_save(const KMamba *m, const char *path);
 KMamba* kmamba_load(const char *path, int for_training,

@@ -109,13 +109,20 @@ int kmamba_init(KMamba *m, uint32_t seed) {
 
 int kmamba_enable_training(KMamba *m, const MBOptimConfig *opt_blocks,
                                float lr_embed_head, float weight_decay) {
+    return kmamba_enable_training_with_optimizer(m, OPTIMIZER_ADAM_CLIP, opt_blocks, 
+                                                 lr_embed_head, weight_decay);
+}
+
+int kmamba_enable_training_with_optimizer(KMamba *m, OptimizerType opt_type,
+                                          const MBOptimConfig *opt_blocks,
+                                          float lr_embed_head, float weight_decay) {
     if (!m || !opt_blocks) return -1;
     m->for_training = 1;
     m->opt_blocks = *opt_blocks;
     m->lr_embed_head = lr_embed_head;
     m->weight_decay = weight_decay;
     for (size_t i = 0; i < m->cfg.n_layers; i++)
-        mamba_attach_optimizer(m->layers[i], opt_blocks);
+        mamba_attach_optimizer(m->layers[i], opt_type, opt_blocks);
     return 0;
 }
 

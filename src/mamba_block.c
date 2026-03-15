@@ -411,7 +411,7 @@ void mb_compute_delta(float *delta_out, const MambaBlock *block,
  * Optimizer — MUONCLIP
  * ============================================================================ */
 
-void mamba_attach_optimizer(MambaBlock *block, const MBOptimConfig *optconf) {
+void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptimConfig *optconf) {
     if (!block) return;
     MBOptimState *s = (MBOptimState *)malloc(sizeof(MBOptimState));
     size_t dim = block->config.dim;
@@ -419,6 +419,8 @@ void mamba_attach_optimizer(MambaBlock *block, const MBOptimConfig *optconf) {
     size_t size_in = state * dim;
     size_t size_out = dim * state;
     memset(s, 0, sizeof(MBOptimState));
+    
+    s->type = type;
 
     s->g_W_in = (float *)calloc(size_in, sizeof(float));
     s->g_W_out = (float *)calloc(size_out, sizeof(float));
@@ -427,12 +429,15 @@ void mamba_attach_optimizer(MambaBlock *block, const MBOptimConfig *optconf) {
     s->g_C_mat = (float *)calloc(state, sizeof(float));
     s->g_delta_proj = (float *)calloc(dim, sizeof(float));
 
-    s->m_W_in = (float *)calloc(size_in, sizeof(float)); s->v_W_in = (float *)calloc(size_in, sizeof(float));
-    s->m_W_out = (float *)calloc(size_out, sizeof(float)); s->v_W_out = (float *)calloc(size_out, sizeof(float));
-    s->m_A_log = (float *)calloc(state, sizeof(float)); s->v_A_log = (float *)calloc(state, sizeof(float));
-    s->m_B_mat = (float *)calloc(state, sizeof(float)); s->v_B_mat = (float *)calloc(state, sizeof(float));
-    s->m_C_mat = (float *)calloc(state, sizeof(float)); s->v_C_mat = (float *)calloc(state, sizeof(float));
-    s->m_delta_proj = (float *)calloc(dim, sizeof(float)); s->v_delta_proj = (float *)calloc(dim, sizeof(float));
+    /* Allocate moments only for ADAM-based optimizers */
+    if (type == OPTIMIZER_ADAM_CLIP || type == OPTIMIZER_ADAMW) {
+        s->m_W_in = (float *)calloc(size_in, sizeof(float)); s->v_W_in = (float *)calloc(size_in, sizeof(float));
+        s->m_W_out = (float *)calloc(size_out, sizeof(float)); s->v_W_out = (float *)calloc(size_out, sizeof(float));
+        s->m_A_log = (float *)calloc(state, sizeof(float)); s->v_A_log = (float *)calloc(state, sizeof(float));
+        s->m_B_mat = (float *)calloc(state, sizeof(float)); s->v_B_mat = (float *)calloc(state, sizeof(float));
+        s->m_C_mat = (float *)calloc(state, sizeof(float)); s->v_C_mat = (float *)calloc(state, sizeof(float));
+        s->m_delta_proj = (float *)calloc(dim, sizeof(float)); s->v_delta_proj = (float *)calloc(dim, sizeof(float));
+    }
 
     s->step = 0;
     if (g_opt_n < 256) { g_opt_blocks[g_opt_n] = block; g_opt_states[g_opt_n] = s; g_opt_n++; }
@@ -450,9 +455,15 @@ static void _mamba_free_opt_for(MambaBlock *block) {
             MBOptimState *s = g_opt_states[i];
             if (!s) return;
             free(s->g_W_in); free(s->g_W_out); free(s->g_A_log); free(s->g_B_mat); free(s->g_C_mat); free(s->g_delta_proj);
-            free(s->m_W_in); free(s->v_W_in); free(s->m_W_out); free(s->v_W_out);
-            free(s->m_A_log); free(s->v_A_log); free(s->m_B_mat); free(s->v_B_mat);
-            free(s->m_C_mat); free(s->v_C_mat); free(s->m_delta_proj); free(s->v_delta_proj);
+            
+            /* Free moments only if allocated */
+            if (s->m_W_in) { free(s->m_W_in); free(s->v_W_in); }
+            if (s->m_W_out) { free(s->m_W_out); free(s->v_W_out); }
+            if (s->m_A_log) { free(s->m_A_log); free(s->v_A_log); }
+            if (s->m_B_mat) { free(s->m_B_mat); free(s->v_B_mat); }
+            if (s->m_C_mat) { free(s->m_C_mat); free(s->v_C_mat); }
+            if (s->m_delta_proj) { free(s->m_delta_proj); free(s->v_delta_proj); }
+            
             free(s);
             for (size_t j = i; j + 1 < g_opt_n; j++) { g_opt_blocks[j] = g_opt_blocks[j+1]; g_opt_states[j] = g_opt_states[j+1]; }
             g_opt_n--;
@@ -480,19 +491,21 @@ static MBOptimState* _find_opt(MambaBlock *block) {
     return NULL;
 }
 
-void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
-    MBOptimState *s = _find_opt(block);
-    if (!s) return;
-    s->step += 1;
-    float lr = conf->lr; float mu = conf->mu; float beta2 = conf->beta2; float eps = conf->eps; float clip = conf->clip_norm; float wd = conf->weight_decay;
+/* ============================================================================
+ * Optimizer Implementations
+ * ============================================================================ */
 
+static void adam_clip_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig *conf) {
     size_t dim = block->config.dim; size_t state = block->config.state_size;
     size_t size_in = state * dim; size_t size_out = dim * state;
+    float lr = conf->lr; float mu = conf->mu; float beta2 = conf->beta2; 
+    float eps = conf->eps; float clip = conf->clip_norm; float wd = conf->weight_decay;
 
-#define MUONCLIP_UPDATE(param, grad, m, v, N) do { \
-    double sq = 0.0; for (size_t _i=0; _i < (N); _i++) { double g = (double)(grad[_i]); sq += g*g; } \
-    double gn = sqrt(sq); double scale = 1.0; if (gn > clip && clip>0.0) scale = clip / gn; \
-    for (size_t _i=0; _i < (N); _i++) { float g = grad[_i] * (float)scale + wd * param[_i]; \
+#define ADAM_CLIP_UPDATE(param, grad, m, v, N) do { \
+    /* 1. Gradient clipping avec fonction optimatrix */ \
+    if (clip > 0.0f) gradient_clip_inplace(grad, (N), clip); \
+    /* 2. Adam updates */ \
+    for (size_t _i=0; _i < (N); _i++) { float g = grad[_i] + wd * param[_i]; \
         m[_i] = mu * m[_i] + (1.0f - mu) * g; \
         v[_i] = beta2 * v[_i] + (1.0f - beta2) * (g * g); \
         float m_hat = m[_i] / (1.0f - powf(mu, (float)s->step)); \
@@ -500,14 +513,116 @@ void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
         param[_i] -= lr * m_hat / (sqrtf(v_hat) + eps); } \
     } while (0)
 
-    MUONCLIP_UPDATE(block->W_in.data, s->g_W_in, s->m_W_in, s->v_W_in, size_in);
-    MUONCLIP_UPDATE(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, size_out);
-    MUONCLIP_UPDATE(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, state);
-    MUONCLIP_UPDATE(block->B_mat.data, s->g_B_mat, s->m_B_mat, s->v_B_mat, state);
-    MUONCLIP_UPDATE(block->C_mat.data, s->g_C_mat, s->m_C_mat, s->v_C_mat, state);
-    MUONCLIP_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, s->v_delta_proj, dim);
+    ADAM_CLIP_UPDATE(block->W_in.data, s->g_W_in, s->m_W_in, s->v_W_in, size_in);
+    ADAM_CLIP_UPDATE(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, size_out);
+    ADAM_CLIP_UPDATE(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, state);
+    ADAM_CLIP_UPDATE(block->B_mat.data, s->g_B_mat, s->m_B_mat, s->v_B_mat, state);
+    ADAM_CLIP_UPDATE(block->C_mat.data, s->g_C_mat, s->m_C_mat, s->v_C_mat, state);
+    ADAM_CLIP_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, s->v_delta_proj, dim);
 
-#undef MUONCLIP_UPDATE
+#undef ADAM_CLIP_UPDATE
+}
+
+static void adamw_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig *conf) {
+    size_t dim = block->config.dim; size_t state = block->config.state_size;
+    size_t size_in = state * dim; size_t size_out = dim * state;
+    float lr = conf->lr; float mu = conf->mu; float beta2 = conf->beta2; 
+    float eps = conf->eps; float wd = conf->weight_decay;
+
+#define ADAMW_UPDATE(param, grad, m, v, N) do { \
+    for (size_t _i=0; _i < (N); _i++) { float g = grad[_i]; \
+        m[_i] = mu * m[_i] + (1.0f - mu) * g; \
+        v[_i] = beta2 * v[_i] + (1.0f - beta2) * (g * g); \
+        float m_hat = m[_i] / (1.0f - powf(mu, (float)s->step)); \
+        float v_hat = v[_i] / (1.0f - powf(beta2, (float)s->step)); \
+        param[_i] = param[_i] * (1.0f - lr * wd) - lr * m_hat / (sqrtf(v_hat) + eps); } \
+    } while (0)
+
+    ADAMW_UPDATE(block->W_in.data, s->g_W_in, s->m_W_in, s->v_W_in, size_in);
+    ADAMW_UPDATE(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, size_out);
+    ADAMW_UPDATE(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, state);
+    ADAMW_UPDATE(block->B_mat.data, s->g_B_mat, s->m_B_mat, s->v_B_mat, state);
+    ADAMW_UPDATE(block->C_mat.data, s->g_C_mat, s->m_C_mat, s->v_C_mat, state);
+    ADAMW_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, s->v_delta_proj, dim);
+
+#undef ADAMW_UPDATE
+}
+
+static void sgd_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig *conf) {
+    size_t dim = block->config.dim; size_t state = block->config.state_size;
+    size_t size_in = state * dim; size_t size_out = dim * state;
+    float lr = conf->lr; float mu = conf->mu; float wd = conf->weight_decay;
+
+#define SGD_UPDATE(param, grad, m, N) do { \
+    for (size_t _i=0; _i < (N); _i++) { float g = grad[_i] + wd * param[_i]; \
+        m[_i] = mu * m[_i] + g; \
+        param[_i] -= lr * m[_i]; } \
+    } while (0)
+
+    SGD_UPDATE(block->W_in.data, s->g_W_in, s->m_W_in, size_in);
+    SGD_UPDATE(block->W_out.data, s->g_W_out, s->m_W_out, size_out);
+    SGD_UPDATE(block->A_log.data, s->g_A_log, s->m_A_log, state);
+    SGD_UPDATE(block->B_mat.data, s->g_B_mat, s->m_B_mat, state);
+    SGD_UPDATE(block->C_mat.data, s->g_C_mat, s->m_C_mat, state);
+    SGD_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, dim);
+
+#undef SGD_UPDATE
+}
+
+/* MUON implementation with gradient clipping */
+static void muon_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig *conf) {
+    size_t dim = block->config.dim; size_t state = block->config.state_size;
+    size_t size_in = state * dim; size_t size_out = dim * state;
+    float lr = conf->lr; float mu = conf->mu; float wd = conf->weight_decay;
+    float clip = conf->clip_norm;
+
+#define MUON_UPDATE(param, grad, m, N) do { \
+    /* 1. Momentum avec weight decay */ \
+    for (size_t _i=0; _i < (N); _i++) { \
+        float g = grad[_i] + wd * param[_i]; \
+        m[_i] = mu * m[_i] + (1.0f - mu) * g; \
+    } \
+    /* 2. Gradient clipping sur momentum */ \
+    if (clip > 0.0f) gradient_clip_inplace(m, (N), clip); \
+    /* 3. Update avec momentum clippé */ \
+    for (size_t _i=0; _i < (N); _i++) { \
+        param[_i] -= lr * m[_i]; \
+    } \
+    } while (0)
+
+    MUON_UPDATE(block->W_in.data, s->g_W_in, s->m_W_in, size_in);
+    MUON_UPDATE(block->W_out.data, s->g_W_out, s->m_W_out, size_out);
+    MUON_UPDATE(block->A_log.data, s->g_A_log, s->m_A_log, state);
+    MUON_UPDATE(block->B_mat.data, s->g_B_mat, s->m_B_mat, state);
+    MUON_UPDATE(block->C_mat.data, s->g_C_mat, s->m_C_mat, state);
+    MUON_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, dim);
+
+#undef MUON_UPDATE
+}
+
+void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
+    MBOptimState *s = _find_opt(block);
+    if (!s) return;
+    s->step += 1;
+
+    switch (s->type) {
+        case OPTIMIZER_ADAM_CLIP:
+            adam_clip_update(block, s, conf);
+            break;
+        case OPTIMIZER_ADAMW:
+            adamw_update(block, s, conf);
+            break;
+        case OPTIMIZER_SGD:
+            sgd_update(block, s, conf);
+            break;
+        case OPTIMIZER_MUON:
+            muon_update(block, s, conf);
+            break;
+        default:
+            /* Default to ADAM_CLIP for safety */
+            adam_clip_update(block, s, conf);
+            break;
+    }
 }
 
 /* ============================================================================
