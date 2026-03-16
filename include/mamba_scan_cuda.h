@@ -18,6 +18,7 @@ void mamba_scan1d_cuda_forward(
 
 /* Scan 1D backward */
 void mamba_scan1d_cuda_backward(
+    const float *d_dy,
     const float *d_x,  const float *d_A,
     const float *d_B,  const float *d_C,
     const float *d_dt, const float *d_h,

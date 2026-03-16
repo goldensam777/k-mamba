@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "optimatrix.h"
+#include "scan.h"
 
 /* ============================================================================
  * Basic Matrix type
@@ -72,17 +73,7 @@ typedef enum {
     OPTIMIZER_ADAMW          /* Standard AdamW */
 } OptimizerType;
 
-/* ============================================================================
- * Optimizer Configuration
- * ============================================================================ */
-typedef struct {
-    float lr;
-    float mu;
-    float beta2;
-    float eps;
-    float clip_norm;
-    float weight_decay;
-} MBOptimConfig;
+/* MBOptimConfig est défini dans optimatrix.h */
 
 /* ============================================================================
  * Optimizer State (modular)

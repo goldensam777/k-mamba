@@ -4,7 +4,7 @@
 #include <string.h>
 #include <immintrin.h>
 
-#include "optimatrix.h"
+#include "scan.h"
 
 static size_t scan_tdm_index(long t, long d, long m, long D, long M) {
     return (size_t)(((t * D) + d) * M + m);

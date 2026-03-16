@@ -44,7 +44,7 @@
  */
 
 #include <stdio.h>
-#include "optimatrix.h"
+#include "scan.h"
 #include <math.h>
 
 /* ── IMPLEMENTATION A : Sequential ──────────────────────────────── */

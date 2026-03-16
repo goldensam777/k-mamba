@@ -1,4 +1,5 @@
 #include "mamba_scan_cuda.h"
+#include "scan.h"
 
 /* ============================================================
  * Mamba Scan CUDA Implementation
@@ -11,16 +12,11 @@ void mamba_scan1d_cuda_forward(
     float *d_y, float *d_h,
     int L, int D, int M
 ) {
-    // Call optimatrix CUDA implementation
-    extern void om_scan1d_forward(
-        const float *x, const float *A, const float *B, const float *C,
-        const float *dt, float *y, float *h, int L, int D, int M
-    );
-    
     om_scan1d_forward(d_x, d_A, d_B, d_C, d_dt, d_y, d_h, L, D, M);
 }
 
 void mamba_scan1d_cuda_backward(
+    const float *d_dy,
     const float *d_x,  const float *d_A,
     const float *d_B,  const float *d_C,
     const float *d_dt, const float *d_h,
@@ -29,16 +25,10 @@ void mamba_scan1d_cuda_backward(
     float *d_ddt,
     int L, int D, int M
 ) {
-    // Call optimatrix CUDA backward implementation
-    extern void om_scan1d_backward(
-        const float *x, const float *A, const float *B, const float *C,
-        const float *dt, const float *h, const float *dy,
-        float *dx, float *dA, float *dB, float *dC, float *ddt,
-        int L, int D, int M
+    om_scan1d_backward(
+        d_dy, d_x, d_A, d_B, d_C, d_dt, d_h,
+        d_dx, d_dA, d_dB, d_dC, d_ddt, L, D, M
     );
-    
-    om_scan1d_backward(d_x, d_A, d_B, d_C, d_dt, d_h, d_dy,
-                     d_dx, d_dA, d_dB, d_dC, d_ddt, L, D, M);
 }
 
 void mamba_block_cuda_forward(
