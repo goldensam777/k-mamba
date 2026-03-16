@@ -88,7 +88,12 @@ ou `e_k` est le vecteur unite dans la dimension k.
 
 ### Structure des dependances
 
-En 1D : `h_1 -> h_2 -> h_3 -> h_4`
+En 1D : 
+
+```math
+h_1 -> h_2 -> h_3 -> h_4
+
+```
 
 En 2D :
 
