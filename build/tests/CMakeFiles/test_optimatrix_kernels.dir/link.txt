@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_optimatrix_kernels.dir/unit/test_optimatrix_kernels.c.o -o test_optimatrix_kernels  -lm ../optimatrix/liboptimatrix-cpu.a -lm 

@@ -1,0 +1,366 @@
+Start testing: Mar 16 16:46 WAT
+----------------------------------------------------------
+1/10 Testing: optimatrix_kernels_unit
+1/10 Test: optimatrix_kernels_unit
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimatrix_kernels"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"optimatrix_kernels_unit" start time: Mar 16 16:46 WAT
+Output:
+----------------------------------------------------------
+=== optimatrix Kernels Test Suite ===
+Testing GEMM/GEMV AVX2 implementations
+
+Testing GEMM small matrices (3x4 * 4x2)...
+PASS: GEMM small matrices
+Testing GEMM medium matrices (64x128 * 128x256)...
+PASS: GEMM medium matrices
+Testing GEMM edge cases...
+PASS: GEMM edge cases
+Testing GEMV small (4x3 * 3)...
+PASS: GEMV small
+Testing GEMV large (1024x1024 * 1024)...
+PASS: GEMV large
+
+=== Test Results ===
+Passed: 5/5 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking GEMM performance...
+Reference: 38.321 sec (0.70 GFLOPS)
+AVX2:      34.909 sec (0.77 GFLOPS)
+Speedup:   1.10x
+<end of output>
+Test time =  73.33 sec
+----------------------------------------------------------
+Test Passed.
+"optimatrix_kernels_unit" end time: Mar 16 16:48 WAT
+"optimatrix_kernels_unit" time elapsed: 00:01:13
+----------------------------------------------------------
+
+2/10 Testing: utilitaires_unit
+2/10 Test: utilitaires_unit
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_utilitaires"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"utilitaires_unit" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== optimatrix Utilitaires Test Suite ===
+Testing basic utilitaires available in optimatrix
+
+Testing gradient norm computation...
+PASS: Gradient norm computation
+Testing gradient clipping...
+PASS: Gradient clipping
+Testing vector addition...
+PASS: Vector addition
+Testing vector scaling...
+PASS: Vector scaling
+Testing Hadamard product basic...
+PASS: Hadamard product basic
+
+=== Test Results ===
+Passed: 5/5 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking vector operations...
+Vector Add: 0.923 sec (1.14 G elems/sec)
+<end of output>
+Test time =   1.01 sec
+----------------------------------------------------------
+Test Passed.
+"utilitaires_unit" end time: Mar 16 16:48 WAT
+"utilitaires_unit" time elapsed: 00:00:01
+----------------------------------------------------------
+
+3/10 Testing: kmamba_inference_working
+3/10 Test: kmamba_inference_working
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_inference_working"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"kmamba_inference_working" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== KMamba Inference Test Suite (Working Version) ===
+Testing basic inference functionality
+
+Testing KMamba config creation...
+PASS: Config creation
+Testing token validation...
+PASS: Token validation
+Testing logits computation simulation...
+PASS: Logits computation
+Testing token selection (argmax)...
+PASS: Token selection
+
+=== Test Results ===
+Passed: 4/4 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking simple operations...
+Logits computation: 0.802 sec (0.04 G ops/sec)
+<end of output>
+Test time =   0.81 sec
+----------------------------------------------------------
+Test Passed.
+"kmamba_inference_working" end time: Mar 16 16:48 WAT
+"kmamba_inference_working" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/10 Testing: convnd_integration
+4/10 Test: convnd_integration
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_convnd"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"convnd_integration" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== ConvND Integration Test Suite ===
+Testing ConvND integration with MambaBlock
+
+Testing basic ConvND operations...
+PASS: Basic ConvND operations
+Testing MambaBlock integration with ConvND...
+PASS: MambaBlock integration with ConvND
+
+=== Test Results ===
+Passed: 2/2 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking ConvND performance...
+ConvND Performance:
+  Throughput: 1.53 GB/s
+  Latency:    0.171 ms/forward
+  Data size:  1.00 MB
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"convnd_integration" end time: Mar 16 16:48 WAT
+"convnd_integration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/10 Testing: kmamba_inference_e2e
+5/10 Test: kmamba_inference_e2e
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_inference"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"kmamba_inference_e2e" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== KMamba Inference Test Suite ===
+Testing complete KMamba inference pipeline
+
+Testing basic KMamba forward pass...
+PASS: Basic forward pass
+Testing autoregressive generation...
+PASS: Autoregressive generation
+Testing byte-level vocabulary...
+PASS: Byte-level vocabulary
+
+=== Test Results ===
+Passed: 3/3 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking inference performance...
+Inference Performance:
+  Throughput: 3998.92 tokens/sec
+  Latency:    32.009 ms/forward
+  Model size: 3343872 parameters
+<end of output>
+Test time =   3.26 sec
+----------------------------------------------------------
+Test Passed.
+"kmamba_inference_e2e" end time: Mar 16 16:48 WAT
+"kmamba_inference_e2e" time elapsed: 00:00:03
+----------------------------------------------------------
+
+6/10 Testing: kmamba_training_e2e
+6/10 Test: kmamba_training_e2e
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_training"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"kmamba_training_e2e" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== KMamba Training Test Suite ===
+Testing complete KMamba training pipeline
+
+Testing basic KMamba training step...
+PASS: Basic training step (loss: 5.5357)
+Testing training convergence...
+Loss: 5.5455 -> 0.8294 (6.69x reduction)
+PASS: Training convergence
+Testing batch training...
+Batch loss: 5.5492 (4 sequences)
+PASS: Batch training
+
+=== Test Results ===
+Passed: 3/3 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking training performance...
+Training Performance:
+  Throughput: 9468.34 tokens/sec
+  Latency:    6.759 ms/step
+<end of output>
+Test time =   0.35 sec
+----------------------------------------------------------
+Test Passed.
+"kmamba_training_e2e" end time: Mar 16 16:48 WAT
+"kmamba_training_e2e" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/10 Testing: gradient_utils_unit
+7/10 Test: gradient_utils_unit
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gradient_utils"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"gradient_utils_unit" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== Gradient Utils Test Suite ===
+Testing gradient utilities from optimatrix
+
+Testing gradient norm basic cases...
+PASS: Gradient norm basic cases
+Testing gradient norm random vectors...
+PASS: Gradient norm random vectors
+Testing gradient norm edge cases...
+PASS: Gradient norm edge cases
+Testing gradient clipping (no clipping needed)...
+PASS: Gradient clipping (no clipping)
+Testing gradient clipping (clipping needed)...
+PASS: Gradient clipping (with clipping)
+Testing gradient clipping edge cases...
+Empty vector clipping handled gracefully
+PASS: Gradient clipping edge cases
+Testing gradient clipping (copy version)...
+PASS: Gradient clipping (copy version)
+
+=== Test Results ===
+Passed: 7/7 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking gradient operations...
+Gradient Norm: 0.330 sec (0.30 G elems/sec)
+Gradient Clip: 0.304 sec (0.33 G elems/sec)
+<end of output>
+Test time =   0.69 sec
+----------------------------------------------------------
+Test Passed.
+"gradient_utils_unit" end time: Mar 16 16:48 WAT
+"gradient_utils_unit" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/10 Testing: optimizers_unit
+8/10 Test: optimizers_unit
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimizers_new"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"optimizers_unit" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== k-mamba Optimizer Test Suite ===
+Testing MUONCLIP and SGD optimizers
+
+Testing MUONCLIP optimizer basic functionality...
+PASS: MUONCLIP basic functionality
+Testing MUONCLIP gradient clipping...
+PASS: MUONCLIP gradient clipping
+Testing SGD optimizer basic functionality...
+PASS: SGD basic functionality
+Testing optimizer convergence...
+Loss: 7.017829 -> 0.000000 (3681160960.00x reduction)
+PASS: Optimizer convergence
+Testing optimizer weight decay...
+PASS: Optimizer weight decay
+
+=== Test Results ===
+Passed: 5/5 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking optimizer performance...
+Optimizer Performance:
+  Parameters: 10000
+  Throughput: 71.51 M params/sec
+  Latency: 0.140 ms/step
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"optimizers_unit" end time: Mar 16 16:48 WAT
+"optimizers_unit" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/10 Testing: simple_test
+9/10 Test: simple_test
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_simple"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"simple_test" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== Simple Test Suite ===
+Testing basic functionality
+
+Testing math functions...
+sqrt(3^2 + 4^2) = 5.00 (expected: 5.00)
+PASS: Math functions
+
+Testing memory allocation...
+Sum of 0..999: 499.50
+PASS: Memory allocation
+
+=== Test Results ===
+All basic tests PASSED!
+Build system working correctly!
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"simple_test" end time: Mar 16 16:48 WAT
+"simple_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/10 Testing: OptimizersTest
+10/10 Test: OptimizersTest
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimizers_new"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"OptimizersTest" start time: Mar 16 16:48 WAT
+Output:
+----------------------------------------------------------
+=== k-mamba Optimizer Test Suite ===
+Testing MUONCLIP and SGD optimizers
+
+Testing MUONCLIP optimizer basic functionality...
+PASS: MUONCLIP basic functionality
+Testing MUONCLIP gradient clipping...
+PASS: MUONCLIP gradient clipping
+Testing SGD optimizer basic functionality...
+PASS: SGD basic functionality
+Testing optimizer convergence...
+Loss: 7.017829 -> 0.000000 (3681160960.00x reduction)
+PASS: Optimizer convergence
+Testing optimizer weight decay...
+PASS: Optimizer weight decay
+
+=== Test Results ===
+Passed: 5/5 tests
+All tests PASSED!
+
+=== Performance Benchmarks ===
+Benchmarking optimizer performance...
+Optimizer Performance:
+  Parameters: 10000
+  Throughput: 72.55 M params/sec
+  Latency: 0.138 ms/step
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"OptimizersTest" end time: Mar 16 16:48 WAT
+"OptimizersTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Mar 16 16:48 WAT

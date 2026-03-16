@@ -1,0 +1,2 @@
+/usr/bin/ar qc libk-mamba-cpu.a "CMakeFiles/k-mamba-cpu.dir/scan1d_backward_m.c.o" "CMakeFiles/k-mamba-cpu.dir/mamba_scan.c.o" cpu_scan1d.o cpu_scan2d.o
+/usr/bin/ranlib libk-mamba-cpu.a

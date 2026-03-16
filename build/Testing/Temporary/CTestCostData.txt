@@ -1,0 +1,11 @@
+optimatrix_kernels_unit 4 18.332
+utilitaires_unit 4 0.252709
+convnd_integration 3 0.0138936
+kmamba_inference_e2e 3 1.08743
+kmamba_training_e2e 3 0.117496
+gradient_utils_unit 4 0.171359
+simple_test 4 0.000996021
+OptimizersTest 2 0.00890914
+kmamba_inference_working 3 0.268898
+optimizers_unit 2 0.00971025
+---

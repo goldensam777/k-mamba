@@ -7,9 +7,9 @@
  * Part of k-mamba — uses optimatrix for compute kernels.
  */
 
-#include "kmamba.h"
-#include "optimatrix.h"
-#include "mamba_scan.h"
+#include "../include/kmamba.h"
+#include "../optimatrix/include/optimatrix.h"
+#include "../cpu/include/mamba_scan.h"
 #ifdef KMAMBA_BUILD_CUDA
 #include "mamba_scan_cuda.h"
 #endif

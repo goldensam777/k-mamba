@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_benchmarks.dir/integration/test_benchmarks.c.o -o test_benchmarks  ../cpu/libk-mamba-cpu.a -lm ../optimatrix/liboptimatrix-cpu.a -lm 

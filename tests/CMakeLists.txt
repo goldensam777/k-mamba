@@ -47,12 +47,84 @@ target_compile_options(test_optimatrix_kernels PRIVATE
     -O3 -mavx2 -Wall -Wextra -g
 )
 
+# Tests Benchmarks
+add_executable(test_benchmarks integration/test_benchmarks.c)
+target_link_libraries(test_benchmarks PRIVATE 
+    optimatrix::optimatrix
+    k-mamba-cpu
+    m
+)
+target_compile_options(test_benchmarks PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests ConvND (version réécrite)
+add_executable(test_convnd integration/test_convnd.c)
+target_link_libraries(test_convnd PRIVATE m)
+target_compile_options(test_convnd PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests KMamba inférence (working version)
+add_executable(test_kmamba_inference_working end_to_end/test_kmamba_inference_working.c)
+target_link_libraries(test_kmamba_inference_working PRIVATE m)
+target_compile_options(test_kmamba_inference_working PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests KMamba inférence (version réécrite)
+add_executable(test_kmamba_inference end_to_end/test_kmamba_inference.c)
+target_link_libraries(test_kmamba_inference PRIVATE m)
+target_compile_options(test_kmamba_inference PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests KMamba training (version réécrite)
+add_executable(test_kmamba_training end_to_end/test_kmamba_training.c)
+target_link_libraries(test_kmamba_training PRIVATE m)
+target_compile_options(test_kmamba_training PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests gradient utils
+add_executable(test_gradient_utils unit/test_gradient_utils.c)
+target_link_libraries(test_gradient_utils PRIVATE optimatrix::optimatrix m)
+target_compile_options(test_gradient_utils PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests optimizers (nouveau)
+add_executable(test_optimizers_new unit/test_optimizers.c)
+target_link_libraries(test_optimizers_new PRIVATE m)
+target_compile_options(test_optimizers_new PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
+# Tests simples
+add_executable(test_simple unit/test_simple.c)
+target_link_libraries(test_simple PRIVATE m)
+
+# Tests benchmarks (version réécrite)
+add_executable(test_benchmarks_new integration/test_benchmarks.c)
+target_link_libraries(test_benchmarks_new PRIVATE m)
+target_compile_options(test_benchmarks_new PRIVATE
+    -O3 -mavx2 -Wall -Wextra -g
+)
+
 # Ajouter aux tests CTest
 add_test(NAME optimatrix_kernels_unit COMMAND test_optimatrix_kernels)
+add_test(NAME utilitaires_unit COMMAND test_utilitaires)
+add_test(NAME kmamba_inference_working COMMAND test_kmamba_inference_working)
+add_test(NAME convnd_integration COMMAND test_convnd)
+add_test(NAME kmamba_inference_e2e COMMAND test_kmamba_inference)
+add_test(NAME kmamba_training_e2e COMMAND test_kmamba_training)
+add_test(NAME gradient_utils_unit COMMAND test_gradient_utils)
+add_test(NAME optimizers_unit COMMAND test_optimizers_new)
+add_test(NAME simple_test COMMAND test_simple)
 
 # Activer les tests
 enable_testing()
-add_test(NAME OptimizersTest COMMAND test_optimizers)
+add_test(NAME OptimizersTest COMMAND test_optimizers_new)
 
 if(KMAMBA_BUILD_CUDA)
     add_test(NAME CudaOptimizersTest COMMAND test_cuda_optimizers)

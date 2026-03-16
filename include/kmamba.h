@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "optimatrix.h"
+#include "../optimatrix/include/optimatrix.h"
 
 /* ============================================================================
  * Basic Matrix type

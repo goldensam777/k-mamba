@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_gradient_utils.dir/unit/test_gradient_utils.c.o -o test_gradient_utils  -lm ../optimatrix/liboptimatrix-cpu.a -lm 

@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_utilitaires.dir/unit/test_utilitaires.c.o -o test_utilitaires  -lm ../optimatrix/liboptimatrix-cpu.a -lm 

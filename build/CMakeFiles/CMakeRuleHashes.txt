@@ -1,0 +1,12 @@
+# Hashes of file build rules.
+9229fb458b405eae155de4e0f0adf8c6 cpu/cpu_scan1d.o
+36332382bc6d8d26380d922f8b83b54e cpu/cpu_scan2d.o
+5be0e2effc24801afcd10f662c403019 optimatrix/optimatrix_activations.o
+5cb20ed77452fd36b8397dcce21929b8 optimatrix/optimatrix_conv1d_avx2.o
+94f9a6f3953123de3a072a438c36c789 optimatrix/optimatrix_gemm.o
+350b26d37d57a34ee936cb988c4484b6 optimatrix/optimatrix_gemm_avx2.o
+f846a5d3bf4d3e7ea2a38eae9f575c08 optimatrix/optimatrix_gemv.o
+b4ec130550a9eb93bcd2f43f25b06106 optimatrix/optimatrix_gemv_avx2.o
+003a5d2f457844534b40c17742b13f15 optimatrix/optimatrix_hadamard.o
+e437e916a5b4c3fb07b260bb1dc59da1 optimatrix/optimatrix_scan1d.o
+6f32635b537ad47802db8bd59d53ace2 optimatrix/optimatrix_scan2d.o

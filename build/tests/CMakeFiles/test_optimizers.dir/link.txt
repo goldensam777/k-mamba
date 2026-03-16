@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_optimizers.dir/test_optimizers.c.o -o test_optimizers  /home/samuel-yevi/Dev/optimus/k-mamba/tests/../src/mamba_block.c /home/samuel-yevi/Dev/optimus/k-mamba/tests/../optimatrix/src/optimizer_utils.c -lm 

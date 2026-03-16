@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_benchmarks_new.dir/integration/test_benchmarks.c.o -o test_benchmarks_new  -lm 

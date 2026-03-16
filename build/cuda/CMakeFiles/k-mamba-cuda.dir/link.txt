@@ -1,0 +1,2 @@
+/usr/bin/ar qc libk-mamba-cuda.a "CMakeFiles/k-mamba-cuda.dir/scan1d.cu.o" "CMakeFiles/k-mamba-cuda.dir/scan1d_backward.cu.o" "CMakeFiles/k-mamba-cuda.dir/mamba_scan.cu.o"
+/usr/bin/ranlib libk-mamba-cuda.a

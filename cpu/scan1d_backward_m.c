@@ -1,6 +1,10 @@
 #include <stdlib.h>
 #include <string.h>
-#include "mamba_scan_backward.h"
+
+/* Forward declarations pour éviter les dépendances */
+typedef struct {
+    void *data;
+} MambaScan1DBackwardM1Params;
 
 void scan1d_backward_m_generic(void *p) {
     /* Simplified placeholder implementation */

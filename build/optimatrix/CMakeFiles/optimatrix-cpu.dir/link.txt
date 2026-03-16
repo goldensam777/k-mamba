@@ -1,0 +1,2 @@
+/usr/bin/ar qc liboptimatrix-cpu.a "CMakeFiles/optimatrix-cpu.dir/src/generic_ops.c.o" "CMakeFiles/optimatrix-cpu.dir/src/optimizer_utils.c.o" "CMakeFiles/optimatrix-cpu.dir/src/scan1d_backward.c.o" "CMakeFiles/optimatrix-cpu.dir/src/scan1d_backward_m.c.o" optimatrix_gemm.o optimatrix_gemm_avx2.o optimatrix_gemv.o optimatrix_gemv_avx2.o optimatrix_hadamard.o optimatrix_activations.o optimatrix_conv1d_avx2.o optimatrix_scan1d.o optimatrix_scan2d.o
+/usr/bin/ranlib liboptimatrix-cpu.a

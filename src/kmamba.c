@@ -107,7 +107,7 @@ int kmamba_init(KMamba *m, uint32_t seed) {
     return 0;
 }
 
-int kmamba_enable_training(KMamba *m, const MBOptimConfig *opt_blocks,
+int kmamba_enable_training(KMamba *m, const KMambaOptimConfig *opt_blocks,
                                float lr_embed_head, float weight_decay) {
     return kmamba_enable_training_with_optimizer(m, OPTIMIZER_ADAM_CLIP, opt_blocks, 
                                                  lr_embed_head, weight_decay);

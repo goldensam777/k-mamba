@@ -100,36 +100,36 @@ optimatrix/ — La Puissance (kernels génériques réutilisables)
 
 ## Cycle de vie d'une forward pass
 
-```
+```plain
 Appel utilisateur
        │
        ▼
 ┌─────────────────────────────────────┐
 │ k-mamba : kmamba_forward()          │
-│ 1. embed_lookup() — memcpy        │
-│ 2. Pour chaque layer :            │
-│    mamba_block_forward()          │
-│ 3. gemm_avx2(head, hidden)        │
-│       └──> optimatrix              │
+│ 1. embed_lookup() — memcpy          │
+│ 2. Pour chaque layer :              │
+│    mamba_block_forward()            │
+│ 3. gemm_avx2(head, hidden)          │
+│       └──> optimatrix               │
 └─────────────────────────────────────┘
-                                   │
-       ▼                           │
+                │
+                ▼
 ┌─────────────────────────────────┐
-│ optimatrix (appelé par k-mamba)│
-│ 1. gemv_avx2(W_in, x)               │
-│ 2. silu_f32()                          │
-│ 3. gemv_avx2(delta_proj, x)         │
-│ 4. softplus + clamp                 │
-│ 5. scan1d() or scan2d()             │
-│ 6. gemv_avx2(W_out, h)              │
-│    └──> retourne à k-mamba       │
+│ optimatrix (appelé par k-mamba) │
+│ 1. gemv_avx2(W_in, x)           │
+│ 2. silu_f32()                   │
+│ 3. gemv_avx2(delta_proj, x)     │
+│ 4. softplus + clamp             │
+│ 5. scan1d() or scan2d()         │
+│ 6. gemv_avx2(W_out, h)          │
+│    └──> retourne à k-mamba      │
 └─────────────────────────────────┘
-                                   │
-       ▼                           │
+               │
+               ▼
 ┌─────────────────────────────────────┐
-│ k-mamba : suite du forward        │
-│ 4. softmax() + cross-entropy()   │
-│ 5. retourne logits/loss          │
+│ k-mamba : suite du forward          │
+│ 4. softmax() + cross-entropy()      │
+│ 5. retourne logits/loss             │
 └─────────────────────────────────────┘
 ```
 
@@ -137,7 +137,7 @@ Appel utilisateur
 
 ## Cycle de vie d'une backward pass
 
-```
+```plain
       Appel utilisateur
             │
             ▼
@@ -152,22 +152,22 @@ Appel utilisateur
 │  6. Gradients embedding (scatter)   │
 │  7. Optimizer step (MUONCLIP)       │
 └─────────────────────────────────────┘
-                                   │
-       ▼                           
-┌──────────────────────────────────┼───┐
-│ optimatrix : mamba_backward()    │   │
+                  │
+                  ▼
+┌──────────────────────────────────-───┐
+│ optimatrix : mamba_backward()        │
 │  1. Recompute forward (store)        │
 │  2. Backprop W_out (GEMM)            │
 │  3. scan1d_backward() (ASM/C)        │
 │  4. Backprop SiLU                    │
 │  5. Backprop W_in (GEMM)             │
 │  6. Accumulation gradients           │
-└───────────────────────────────────────┘
-
-                     ▼
+└──────────────────────────────────────┘
+                   |
+                   ▼
 ┌─────────────────────────────────────┐
-│ optimatrix : mamba_optimizer_step()  │
-│  (MUONCLIP via Newton-Schulz)        │
+│ optimatrix : mamba_optimizer_step() │
+│  (MUONCLIP via Newton-Schulz)       │
 └─────────────────────────────────────┘
 ```
 
@@ -182,14 +182,14 @@ Appel utilisateur
 void mamba_block_forward(MambaBlock *block, float *out, const float *in, size_t batch) {
     // La Volonté projette l'entrée dans son espace d'état
     gemm_avx2(in, block->W_in.data, tmp, ...);
-    
+
     // La Volonté choisit quoi retenir (selectivité)
     silu_f32_avx2(tmp, u, ...);
     compute_delta(dt, in, block->delta_proj);
-    
+
     // La Volonté propage son état (récurrence)
     scan1d(&params);  // ou scan2d pour ND
-    
+
     // La Volonté projette sa décision
     gemm_avx2(h, block->W_out.data, out, ...);
 }
@@ -221,6 +221,7 @@ c'est un conflit d'intentions — résolu par l'ordonnancement de k-mamba.
 ### 1. Réutilisabilité
 
 optimatrix peut être utilisé par d'autres projets (pas seulement Mamba) :
+
 - Traitement d'images (ConvND)
 - Séries temporelles (Scan 1D)
 - Algèbre linéaire (GEMM)
@@ -245,12 +246,14 @@ Les détails de calcul sont encapsulés dans optimatrix.
 ## Vision long terme
 
 k-mamba est une brique fondatrice vers un **OS-IA post-Von Neumann** :
+
 - Processus = Volontés (MambaBlocks)
 - Communication = streams de tenseurs
 - Scheduler = ordonnancement wavefront
 - Mémoire = états persistants (h_t)
 
 La séparation Volontés/Puissance préfigure cette architecture :
+
 - Les Volontés sont les processus métier
 - La Puissance est le moteur d'exécution
 
@@ -258,7 +261,7 @@ La séparation Volontés/Puissance préfigure cette architecture :
 
 ## Références
 
-- **AGENTS.md** — Contexte technique et philosophique
+- [**AGENTS.md**](AGENTS.md) — Contexte technique et philosophique
 - **THEORY.md** — Fondement mathématique Mamba-ND
 - **ESTIMATIONS.md** — Complexité et benchmarks
 
@@ -266,6 +269,5 @@ La séparation Volontés/Puissance préfigure cette architecture :
 
 ## Auteur
 
-**YEVI Mawuli Peniel Samuel**
-
-*Ego Sum Optimus Optimus*
+>YEVI Mawuli Peniel Samuel.
+>Ego Sum Optimus Optimus

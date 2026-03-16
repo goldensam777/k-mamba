@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_kmamba_inference.dir/end_to_end/test_kmamba_inference.c.o -o test_kmamba_inference  -lm 

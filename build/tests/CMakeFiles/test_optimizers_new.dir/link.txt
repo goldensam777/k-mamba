@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/test_optimizers_new.dir/unit/test_optimizers.c.o -o test_optimizers_new  -lm 
