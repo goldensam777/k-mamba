@@ -33,10 +33,10 @@ test 1
 1: 
 1: === Performance Benchmarks ===
 1: Benchmarking GEMM performance...
-1: Reference: 38.321 sec (0.70 GFLOPS)
-1: AVX2:      34.909 sec (0.77 GFLOPS)
-1: Speedup:   1.10x
- 1/10 Test  #1: optimatrix_kernels_unit ..........   Passed   73.33 sec
+1: Reference: 36.113 sec (0.74 GFLOPS)
+1: AVX2:      35.189 sec (0.76 GFLOPS)
+1: Speedup:   1.03x
+ 1/12 Test  #1: optimatrix_kernels_unit ..........   Passed   71.41 sec
 test 2
       Start  2: utilitaires_unit
 
@@ -63,8 +63,8 @@ test 2
 2: 
 2: === Performance Benchmarks ===
 2: Benchmarking vector operations...
-2: Vector Add: 0.923 sec (1.14 G elems/sec)
- 2/10 Test  #2: utilitaires_unit .................   Passed    1.01 sec
+2: Vector Add: 0.986 sec (1.06 G elems/sec)
+ 2/12 Test  #2: utilitaires_unit .................   Passed    1.08 sec
 test 3
       Start  3: kmamba_inference_working
 
@@ -89,8 +89,8 @@ test 3
 3: 
 3: === Performance Benchmarks ===
 3: Benchmarking simple operations...
-3: Logits computation: 0.802 sec (0.04 G ops/sec)
- 3/10 Test  #3: kmamba_inference_working .........   Passed    0.81 sec
+3: Logits computation: 0.822 sec (0.04 G ops/sec)
+ 3/12 Test  #3: kmamba_inference_working .........   Passed    0.83 sec
 test 4
       Start  4: convnd_integration
 
@@ -112,10 +112,10 @@ test 4
 4: === Performance Benchmarks ===
 4: Benchmarking ConvND performance...
 4: ConvND Performance:
-4:   Throughput: 1.53 GB/s
-4:   Latency:    0.171 ms/forward
+4:   Throughput: 1.44 GB/s
+4:   Latency:    0.182 ms/forward
 4:   Data size:  1.00 MB
- 4/10 Test  #4: convnd_integration ...............   Passed    0.04 sec
+ 4/12 Test  #4: convnd_integration ...............   Passed    0.04 sec
 test 5
       Start  5: kmamba_inference_e2e
 
@@ -139,10 +139,10 @@ test 5
 5: === Performance Benchmarks ===
 5: Benchmarking inference performance...
 5: Inference Performance:
-5:   Throughput: 3998.92 tokens/sec
-5:   Latency:    32.009 ms/forward
+5:   Throughput: 3761.33 tokens/sec
+5:   Latency:    34.030 ms/forward
 5:   Model size: 3343872 parameters
- 5/10 Test  #5: kmamba_inference_e2e .............   Passed    3.26 sec
+ 5/12 Test  #5: kmamba_inference_e2e .............   Passed    3.48 sec
 test 6
       Start  6: kmamba_training_e2e
 
@@ -168,9 +168,9 @@ test 6
 6: === Performance Benchmarks ===
 6: Benchmarking training performance...
 6: Training Performance:
-6:   Throughput: 9468.34 tokens/sec
-6:   Latency:    6.759 ms/step
- 6/10 Test  #6: kmamba_training_e2e ..............   Passed    0.35 sec
+6:   Throughput: 7829.50 tokens/sec
+6:   Latency:    8.174 ms/step
+ 6/12 Test  #6: kmamba_training_e2e ..............   Passed    0.42 sec
 test 7
       Start  7: gradient_utils_unit
 
@@ -202,9 +202,9 @@ test 7
 7: 
 7: === Performance Benchmarks ===
 7: Benchmarking gradient operations...
-7: Gradient Norm: 0.330 sec (0.30 G elems/sec)
-7: Gradient Clip: 0.304 sec (0.33 G elems/sec)
- 7/10 Test  #7: gradient_utils_unit ..............   Passed    0.69 sec
+7: Gradient Norm: 0.346 sec (0.29 G elems/sec)
+7: Gradient Clip: 0.328 sec (0.30 G elems/sec)
+ 7/12 Test  #7: gradient_utils_unit ..............   Passed    0.74 sec
 test 8
       Start  8: optimizers_unit
 
@@ -234,9 +234,9 @@ test 8
 8: Benchmarking optimizer performance...
 8: Optimizer Performance:
 8:   Parameters: 10000
-8:   Throughput: 71.51 M params/sec
-8:   Latency: 0.140 ms/step
- 8/10 Test  #8: optimizers_unit ..................   Passed    0.02 sec
+8:   Throughput: 58.10 M params/sec
+8:   Latency: 0.172 ms/step
+ 8/12 Test  #8: optimizers_unit ..................   Passed    0.02 sec
 test 9
       Start  9: simple_test
 
@@ -257,7 +257,7 @@ test 9
 9: === Test Results ===
 9: All basic tests PASSED!
 9: Build system working correctly!
- 9/10 Test  #9: simple_test ......................   Passed    0.00 sec
+ 9/12 Test  #9: simple_test ......................   Passed    0.00 sec
 test 10
       Start 10: OptimizersTest
 
@@ -287,10 +287,100 @@ test 10
 10: Benchmarking optimizer performance...
 10: Optimizer Performance:
 10:   Parameters: 10000
-10:   Throughput: 72.55 M params/sec
-10:   Latency: 0.138 ms/step
-10/10 Test #10: OptimizersTest ...................   Passed    0.02 sec
+10:   Throughput: 67.85 M params/sec
+10:   Latency: 0.147 ms/step
+10/12 Test #10: OptimizersTest ...................   Passed    0.02 sec
+test 11
+      Start 11: gpu_simple_test
 
-100% tests passed, 0 tests failed out of 10
+11: Test command: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple
+11: Working Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+11: Test timeout computed to be: 10000000
+11: === k-mamba GPU Test Suite (Simple) ===
+11: Testing basic GPU functionality
+11: 
+11: Initializing GPU device...
+11: GPU: NVIDIA GeForce MX450 (Compute 7.5)
+11: Memory: 1.8 GB total, 1.7 GB free
+11: Testing basic GPU memory operations...
+11: PASS: Basic GPU memory operations
+11: Testing GPU vector operations...
+11: GPU Vector Add Performance:
+11:   Size: 1048576 elements
+11:   Bandwidth: 18.88 GB/s
+11:   Latency: 0.666 ms
+11: PASS: GPU vector operations
+11: Testing GPU matrix multiplication...
+11: GPU Matrix Multiply Performance:
+11:   Size: 512x512x512
+11:   GFLOPS: 160.91
+11:   Latency: 1.668 ms
+11: PASS: GPU matrix multiplication
+11: Testing GPU KMamba simulation...
+11: GPU KMamba Simulation Performance:
+11:   Model: 256 vocab, 512 dim, 128 seq_len
+11:   Batch: 4
+11:   Throughput: 895113.50 tokens/sec
+11:   Latency: 0.572 ms/forward
+11: PASS: GPU KMamba simulation
+11: 
+11: === GPU Test Results ===
+11: Passed: 4/4 tests
+11: All GPU tests PASSED!
+11: 
+11: === GPU Device Summary ===
+11: Device: NVIDIA GeForce MX450
+11: Compute: 7.5
+11: Memory: 1.8 GB total, 1.7 GB free
+11: Max Threads/Block: 1024
+11: Clock Rate: 1.57 GHz
+11/12 Test #11: gpu_simple_test ..................   Passed    0.72 sec
+test 12
+      Start 12: GpuSimpleTest
 
-Total Test time (real) =  79.54 sec
+12: Test command: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple
+12: Working Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+12: Test timeout computed to be: 10000000
+12: === k-mamba GPU Test Suite (Simple) ===
+12: Testing basic GPU functionality
+12: 
+12: Initializing GPU device...
+12: GPU: NVIDIA GeForce MX450 (Compute 7.5)
+12: Memory: 1.8 GB total, 1.7 GB free
+12: Testing basic GPU memory operations...
+12: PASS: Basic GPU memory operations
+12: Testing GPU vector operations...
+12: GPU Vector Add Performance:
+12:   Size: 1048576 elements
+12:   Bandwidth: 18.39 GB/s
+12:   Latency: 0.684 ms
+12: PASS: GPU vector operations
+12: Testing GPU matrix multiplication...
+12: GPU Matrix Multiply Performance:
+12:   Size: 512x512x512
+12:   GFLOPS: 160.36
+12:   Latency: 1.674 ms
+12: PASS: GPU matrix multiplication
+12: Testing GPU KMamba simulation...
+12: GPU KMamba Simulation Performance:
+12:   Model: 256 vocab, 512 dim, 128 seq_len
+12:   Batch: 4
+12:   Throughput: 964626.29 tokens/sec
+12:   Latency: 0.531 ms/forward
+12: PASS: GPU KMamba simulation
+12: 
+12: === GPU Test Results ===
+12: Passed: 4/4 tests
+12: All GPU tests PASSED!
+12: 
+12: === GPU Device Summary ===
+12: Device: NVIDIA GeForce MX450
+12: Compute: 7.5
+12: Memory: 1.8 GB total, 1.7 GB free
+12: Max Threads/Block: 1024
+12: Clock Rate: 1.57 GHz
+12/12 Test #12: GpuSimpleTest ....................   Passed    0.58 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =  79.35 sec

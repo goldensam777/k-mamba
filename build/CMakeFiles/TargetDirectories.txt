@@ -22,7 +22,16 @@
 /home/samuel-yevi/Dev/optimus/k-mamba/build/cpu/CMakeFiles/install.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/cpu/CMakeFiles/install/local.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/cpu/CMakeFiles/install/strip.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/k-mamba-cuda.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/test.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/edit_cache.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/rebuild_cache.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/list_install_components.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/install.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/install/local.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/cuda/CMakeFiles/install/strip.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_optimizers.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_cuda_optimizers.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_optimatrix_kernels.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_benchmarks.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_convnd.dir
@@ -33,6 +42,7 @@
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_optimizers_new.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_simple.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_benchmarks_new.dir
+/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test_gpu_simple.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/test.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/edit_cache.dir
 /home/samuel-yevi/Dev/optimus/k-mamba/build/tests/CMakeFiles/rebuild_cache.dir

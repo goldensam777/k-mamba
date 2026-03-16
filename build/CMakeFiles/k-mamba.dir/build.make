@@ -125,7 +125,7 @@ libk-mamba.a: CMakeFiles/k-mamba.dir/src/mamba_block.c.o
 libk-mamba.a: CMakeFiles/k-mamba.dir/src/convnd.c.o
 libk-mamba.a: CMakeFiles/k-mamba.dir/build.make
 libk-mamba.a: CMakeFiles/k-mamba.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking C static library libk-mamba.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CUDA static library libk-mamba.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/k-mamba.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/k-mamba.dir/link.txt --verbose=$(VERBOSE)
 

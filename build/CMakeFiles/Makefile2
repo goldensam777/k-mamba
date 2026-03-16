@@ -66,12 +66,14 @@ CMAKE_BINARY_DIR = /home/samuel-yevi/Dev/optimus/k-mamba/build
 all: CMakeFiles/k-mamba.dir/all
 all: optimatrix/all
 all: cpu/all
+all: cuda/all
 all: tests/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
 preinstall: optimatrix/preinstall
 preinstall: cpu/preinstall
+preinstall: cuda/preinstall
 preinstall: tests/preinstall
 .PHONY : preinstall
 
@@ -79,6 +81,7 @@ preinstall: tests/preinstall
 clean: CMakeFiles/k-mamba.dir/clean
 clean: optimatrix/clean
 clean: cpu/clean
+clean: cuda/clean
 clean: tests/clean
 .PHONY : clean
 
@@ -96,6 +99,21 @@ cpu/preinstall:
 # Recursive "clean" directory target.
 cpu/clean: cpu/CMakeFiles/k-mamba-cpu.dir/clean
 .PHONY : cpu/clean
+
+#=============================================================================
+# Directory level rules for directory cuda
+
+# Recursive "all" directory target.
+cuda/all: cuda/CMakeFiles/k-mamba-cuda.dir/all
+.PHONY : cuda/all
+
+# Recursive "preinstall" directory target.
+cuda/preinstall:
+.PHONY : cuda/preinstall
+
+# Recursive "clean" directory target.
+cuda/clean: cuda/CMakeFiles/k-mamba-cuda.dir/clean
+.PHONY : cuda/clean
 
 #=============================================================================
 # Directory level rules for directory optimatrix
@@ -117,6 +135,7 @@ optimatrix/clean: optimatrix/CMakeFiles/optimatrix-cpu.dir/clean
 
 # Recursive "all" directory target.
 tests/all: tests/CMakeFiles/test_optimizers.dir/all
+tests/all: tests/CMakeFiles/test_cuda_optimizers.dir/all
 tests/all: tests/CMakeFiles/test_optimatrix_kernels.dir/all
 tests/all: tests/CMakeFiles/test_benchmarks.dir/all
 tests/all: tests/CMakeFiles/test_convnd.dir/all
@@ -127,6 +146,7 @@ tests/all: tests/CMakeFiles/test_gradient_utils.dir/all
 tests/all: tests/CMakeFiles/test_optimizers_new.dir/all
 tests/all: tests/CMakeFiles/test_simple.dir/all
 tests/all: tests/CMakeFiles/test_benchmarks_new.dir/all
+tests/all: tests/CMakeFiles/test_gpu_simple.dir/all
 .PHONY : tests/all
 
 # Recursive "preinstall" directory target.
@@ -135,6 +155,7 @@ tests/preinstall:
 
 # Recursive "clean" directory target.
 tests/clean: tests/CMakeFiles/test_optimizers.dir/clean
+tests/clean: tests/CMakeFiles/test_cuda_optimizers.dir/clean
 tests/clean: tests/CMakeFiles/test_optimatrix_kernels.dir/clean
 tests/clean: tests/CMakeFiles/test_benchmarks.dir/clean
 tests/clean: tests/CMakeFiles/test_convnd.dir/clean
@@ -145,6 +166,7 @@ tests/clean: tests/CMakeFiles/test_gradient_utils.dir/clean
 tests/clean: tests/CMakeFiles/test_optimizers_new.dir/clean
 tests/clean: tests/CMakeFiles/test_simple.dir/clean
 tests/clean: tests/CMakeFiles/test_benchmarks_new.dir/clean
+tests/clean: tests/CMakeFiles/test_gpu_simple.dir/clean
 .PHONY : tests/clean
 
 #=============================================================================
@@ -153,6 +175,7 @@ tests/clean: tests/CMakeFiles/test_benchmarks_new.dir/clean
 # All Build rule for target.
 CMakeFiles/k-mamba.dir/all: optimatrix/CMakeFiles/optimatrix-cpu.dir/all
 CMakeFiles/k-mamba.dir/all: cpu/CMakeFiles/k-mamba-cpu.dir/all
+CMakeFiles/k-mamba.dir/all: cuda/CMakeFiles/k-mamba-cuda.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/k-mamba.dir/build.make CMakeFiles/k-mamba.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/k-mamba.dir/build.make CMakeFiles/k-mamba.dir/build
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=1,2,3,4 "Built target k-mamba"
@@ -160,7 +183,7 @@ CMakeFiles/k-mamba.dir/all: cpu/CMakeFiles/k-mamba-cpu.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/k-mamba.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 23
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 27
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/k-mamba.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 0
 .PHONY : CMakeFiles/k-mamba.dir/rule
@@ -181,7 +204,7 @@ CMakeFiles/k-mamba.dir/clean:
 optimatrix/CMakeFiles/optimatrix-cpu.dir/all:
 	$(MAKE) $(MAKESILENT) -f optimatrix/CMakeFiles/optimatrix-cpu.dir/build.make optimatrix/CMakeFiles/optimatrix-cpu.dir/depend
 	$(MAKE) $(MAKESILENT) -f optimatrix/CMakeFiles/optimatrix-cpu.dir/build.make optimatrix/CMakeFiles/optimatrix-cpu.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=10,11,12,13,14,15,16,17,18,19,20,21,22,23 "Built target optimatrix-cpu"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=14,15,16,17,18,19,20,21,22,23,24,25,26,27 "Built target optimatrix-cpu"
 .PHONY : optimatrix/CMakeFiles/optimatrix-cpu.dir/all
 
 # Build rule for subdir invocation for target.
@@ -227,13 +250,39 @@ cpu/CMakeFiles/k-mamba-cpu.dir/clean:
 .PHONY : cpu/CMakeFiles/k-mamba-cpu.dir/clean
 
 #=============================================================================
+# Target rules for target cuda/CMakeFiles/k-mamba-cuda.dir
+
+# All Build rule for target.
+cuda/CMakeFiles/k-mamba-cuda.dir/all:
+	$(MAKE) $(MAKESILENT) -f cuda/CMakeFiles/k-mamba-cuda.dir/build.make cuda/CMakeFiles/k-mamba-cuda.dir/depend
+	$(MAKE) $(MAKESILENT) -f cuda/CMakeFiles/k-mamba-cuda.dir/build.make cuda/CMakeFiles/k-mamba-cuda.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=10,11,12,13 "Built target k-mamba-cuda"
+.PHONY : cuda/CMakeFiles/k-mamba-cuda.dir/all
+
+# Build rule for subdir invocation for target.
+cuda/CMakeFiles/k-mamba-cuda.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 4
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 cuda/CMakeFiles/k-mamba-cuda.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 0
+.PHONY : cuda/CMakeFiles/k-mamba-cuda.dir/rule
+
+# Convenience name for target.
+k-mamba-cuda: cuda/CMakeFiles/k-mamba-cuda.dir/rule
+.PHONY : k-mamba-cuda
+
+# clean rule for target.
+cuda/CMakeFiles/k-mamba-cuda.dir/clean:
+	$(MAKE) $(MAKESILENT) -f cuda/CMakeFiles/k-mamba-cuda.dir/build.make cuda/CMakeFiles/k-mamba-cuda.dir/clean
+.PHONY : cuda/CMakeFiles/k-mamba-cuda.dir/clean
+
+#=============================================================================
 # Target rules for target tests/CMakeFiles/test_optimizers.dir
 
 # All Build rule for target.
 tests/CMakeFiles/test_optimizers.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimizers.dir/build.make tests/CMakeFiles/test_optimizers.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimizers.dir/build.make tests/CMakeFiles/test_optimizers.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=40,41 "Built target test_optimizers"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=49,50 "Built target test_optimizers"
 .PHONY : tests/CMakeFiles/test_optimizers.dir/all
 
 # Build rule for subdir invocation for target.
@@ -253,13 +302,39 @@ tests/CMakeFiles/test_optimizers.dir/clean:
 .PHONY : tests/CMakeFiles/test_optimizers.dir/clean
 
 #=============================================================================
+# Target rules for target tests/CMakeFiles/test_cuda_optimizers.dir
+
+# All Build rule for target.
+tests/CMakeFiles/test_cuda_optimizers.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=34,35,36 "Built target test_cuda_optimizers"
+.PHONY : tests/CMakeFiles/test_cuda_optimizers.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/test_cuda_optimizers.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/test_cuda_optimizers.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/test_cuda_optimizers.dir/rule
+
+# Convenience name for target.
+test_cuda_optimizers: tests/CMakeFiles/test_cuda_optimizers.dir/rule
+.PHONY : test_cuda_optimizers
+
+# clean rule for target.
+tests/CMakeFiles/test_cuda_optimizers.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/clean
+.PHONY : tests/CMakeFiles/test_cuda_optimizers.dir/clean
+
+#=============================================================================
 # Target rules for target tests/CMakeFiles/test_optimatrix_kernels.dir
 
 # All Build rule for target.
 tests/CMakeFiles/test_optimatrix_kernels.dir/all: optimatrix/CMakeFiles/optimatrix-cpu.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimatrix_kernels.dir/build.make tests/CMakeFiles/test_optimatrix_kernels.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimatrix_kernels.dir/build.make tests/CMakeFiles/test_optimatrix_kernels.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=38,39 "Built target test_optimatrix_kernels"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=47,48 "Built target test_optimatrix_kernels"
 .PHONY : tests/CMakeFiles/test_optimatrix_kernels.dir/all
 
 # Build rule for subdir invocation for target.
@@ -286,7 +361,7 @@ tests/CMakeFiles/test_benchmarks.dir/all: optimatrix/CMakeFiles/optimatrix-cpu.d
 tests/CMakeFiles/test_benchmarks.dir/all: cpu/CMakeFiles/k-mamba-cpu.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks.dir/build.make tests/CMakeFiles/test_benchmarks.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks.dir/build.make tests/CMakeFiles/test_benchmarks.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=24,25 "Built target test_benchmarks"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=28,29 "Built target test_benchmarks"
 .PHONY : tests/CMakeFiles/test_benchmarks.dir/all
 
 # Build rule for subdir invocation for target.
@@ -312,7 +387,7 @@ tests/CMakeFiles/test_benchmarks.dir/clean:
 tests/CMakeFiles/test_convnd.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_convnd.dir/build.make tests/CMakeFiles/test_convnd.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_convnd.dir/build.make tests/CMakeFiles/test_convnd.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=28,29 "Built target test_convnd"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=32,33 "Built target test_convnd"
 .PHONY : tests/CMakeFiles/test_convnd.dir/all
 
 # Build rule for subdir invocation for target.
@@ -338,7 +413,7 @@ tests/CMakeFiles/test_convnd.dir/clean:
 tests/CMakeFiles/test_kmamba_inference_working.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_inference_working.dir/build.make tests/CMakeFiles/test_kmamba_inference_working.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_inference_working.dir/build.make tests/CMakeFiles/test_kmamba_inference_working.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=34,35 "Built target test_kmamba_inference_working"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=43,44 "Built target test_kmamba_inference_working"
 .PHONY : tests/CMakeFiles/test_kmamba_inference_working.dir/all
 
 # Build rule for subdir invocation for target.
@@ -364,7 +439,7 @@ tests/CMakeFiles/test_kmamba_inference_working.dir/clean:
 tests/CMakeFiles/test_kmamba_inference.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_inference.dir/build.make tests/CMakeFiles/test_kmamba_inference.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_inference.dir/build.make tests/CMakeFiles/test_kmamba_inference.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=32,33 "Built target test_kmamba_inference"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=41,42 "Built target test_kmamba_inference"
 .PHONY : tests/CMakeFiles/test_kmamba_inference.dir/all
 
 # Build rule for subdir invocation for target.
@@ -390,7 +465,7 @@ tests/CMakeFiles/test_kmamba_inference.dir/clean:
 tests/CMakeFiles/test_kmamba_training.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_training.dir/build.make tests/CMakeFiles/test_kmamba_training.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_training.dir/build.make tests/CMakeFiles/test_kmamba_training.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=36,37 "Built target test_kmamba_training"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=45,46 "Built target test_kmamba_training"
 .PHONY : tests/CMakeFiles/test_kmamba_training.dir/all
 
 # Build rule for subdir invocation for target.
@@ -416,7 +491,7 @@ tests/CMakeFiles/test_kmamba_training.dir/clean:
 tests/CMakeFiles/test_gradient_utils.dir/all: optimatrix/CMakeFiles/optimatrix-cpu.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gradient_utils.dir/build.make tests/CMakeFiles/test_gradient_utils.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gradient_utils.dir/build.make tests/CMakeFiles/test_gradient_utils.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=30,31 "Built target test_gradient_utils"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=39,40 "Built target test_gradient_utils"
 .PHONY : tests/CMakeFiles/test_gradient_utils.dir/all
 
 # Build rule for subdir invocation for target.
@@ -442,7 +517,7 @@ tests/CMakeFiles/test_gradient_utils.dir/clean:
 tests/CMakeFiles/test_optimizers_new.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimizers_new.dir/build.make tests/CMakeFiles/test_optimizers_new.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimizers_new.dir/build.make tests/CMakeFiles/test_optimizers_new.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=42,43 "Built target test_optimizers_new"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=51,52 "Built target test_optimizers_new"
 .PHONY : tests/CMakeFiles/test_optimizers_new.dir/all
 
 # Build rule for subdir invocation for target.
@@ -468,7 +543,7 @@ tests/CMakeFiles/test_optimizers_new.dir/clean:
 tests/CMakeFiles/test_simple.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_simple.dir/build.make tests/CMakeFiles/test_simple.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_simple.dir/build.make tests/CMakeFiles/test_simple.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=44,45 "Built target test_simple"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=53,54 "Built target test_simple"
 .PHONY : tests/CMakeFiles/test_simple.dir/all
 
 # Build rule for subdir invocation for target.
@@ -494,7 +569,7 @@ tests/CMakeFiles/test_simple.dir/clean:
 tests/CMakeFiles/test_benchmarks_new.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks_new.dir/build.make tests/CMakeFiles/test_benchmarks_new.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks_new.dir/build.make tests/CMakeFiles/test_benchmarks_new.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=26,27 "Built target test_benchmarks_new"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=30,31 "Built target test_benchmarks_new"
 .PHONY : tests/CMakeFiles/test_benchmarks_new.dir/all
 
 # Build rule for subdir invocation for target.
@@ -512,6 +587,32 @@ test_benchmarks_new: tests/CMakeFiles/test_benchmarks_new.dir/rule
 tests/CMakeFiles/test_benchmarks_new.dir/clean:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks_new.dir/build.make tests/CMakeFiles/test_benchmarks_new.dir/clean
 .PHONY : tests/CMakeFiles/test_benchmarks_new.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/test_gpu_simple.dir
+
+# All Build rule for target.
+tests/CMakeFiles/test_gpu_simple.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles --progress-num=37,38 "Built target test_gpu_simple"
+.PHONY : tests/CMakeFiles/test_gpu_simple.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/test_gpu_simple.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/test_gpu_simple.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/samuel-yevi/Dev/optimus/k-mamba/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/test_gpu_simple.dir/rule
+
+# Convenience name for target.
+test_gpu_simple: tests/CMakeFiles/test_gpu_simple.dir/rule
+.PHONY : test_gpu_simple
+
+# clean rule for target.
+tests/CMakeFiles/test_gpu_simple.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/clean
+.PHONY : tests/CMakeFiles/test_gpu_simple.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

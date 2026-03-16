@@ -1,11 +1,13 @@
-optimatrix_kernels_unit 4 18.332
-utilitaires_unit 4 0.252709
-convnd_integration 3 0.0138936
-kmamba_inference_e2e 3 1.08743
-kmamba_training_e2e 3 0.117496
-gradient_utils_unit 4 0.171359
-simple_test 4 0.000996021
-OptimizersTest 2 0.00890914
-kmamba_inference_working 3 0.268898
-optimizers_unit 2 0.00971025
+optimatrix_kernels_unit 7 10.2009
+utilitaires_unit 7 0.153971
+convnd_integration 6 0.00717982
+kmamba_inference_e2e 6 0.579449
+kmamba_training_e2e 6 0.0705466
+gradient_utils_unit 7 0.105238
+simple_test 7 0.000569518
+OptimizersTest 5 0.00377223
+kmamba_inference_working 6 0.137647
+optimizers_unit 5 0.00417965
+gpu_simple_test 3 0.23992
+GpuSimpleTest 3 0.193343
 ---

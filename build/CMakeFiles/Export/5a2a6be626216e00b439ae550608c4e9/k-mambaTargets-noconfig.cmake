@@ -25,5 +25,15 @@ set_target_properties(k-mamba::k-mamba-cpu PROPERTIES
 list(APPEND _cmake_import_check_targets k-mamba::k-mamba-cpu )
 list(APPEND _cmake_import_check_files_for_k-mamba::k-mamba-cpu "${_IMPORT_PREFIX}/lib/libk-mamba-cpu.a" )
 
+# Import target "k-mamba::k-mamba-cuda" for configuration ""
+set_property(TARGET k-mamba::k-mamba-cuda APPEND PROPERTY IMPORTED_CONFIGURATIONS NOCONFIG)
+set_target_properties(k-mamba::k-mamba-cuda PROPERTIES
+  IMPORTED_LINK_INTERFACE_LANGUAGES_NOCONFIG "CUDA"
+  IMPORTED_LOCATION_NOCONFIG "${_IMPORT_PREFIX}/lib/libk-mamba-cuda.a"
+  )
+
+list(APPEND _cmake_import_check_targets k-mamba::k-mamba-cuda )
+list(APPEND _cmake_import_check_files_for_k-mamba::k-mamba-cuda "${_IMPORT_PREFIX}/lib/libk-mamba-cuda.a" )
+
 # Commands beyond this point should not need to know the version.
 set(CMAKE_IMPORT_FILE_VERSION)

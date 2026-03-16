@@ -15,6 +15,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.28.3/CMakeSystem.cmake"
   "/home/samuel-yevi/Dev/optimus/k-mamba/cmake/k-mambaConfig.cmake.in"
   "/home/samuel-yevi/Dev/optimus/k-mamba/cpu/CMakeLists.txt"
+  "/home/samuel-yevi/Dev/optimus/k-mamba/cuda/CMakeLists.txt"
   "/home/samuel-yevi/Dev/optimus/k-mamba/optimatrix/CMakeLists.txt"
   "/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt"
   "/usr/share/cmake-3.28/Modules/BasicConfigVersion-SameMajorVersion.cmake.in"
@@ -59,6 +60,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   "optimatrix/CMakeFiles/CMakeDirectoryInformation.cmake"
   "cpu/CMakeFiles/CMakeDirectoryInformation.cmake"
+  "cuda/CMakeFiles/CMakeDirectoryInformation.cmake"
   "tests/CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
@@ -67,7 +69,9 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/k-mamba.dir/DependInfo.cmake"
   "optimatrix/CMakeFiles/optimatrix-cpu.dir/DependInfo.cmake"
   "cpu/CMakeFiles/k-mamba-cpu.dir/DependInfo.cmake"
+  "cuda/CMakeFiles/k-mamba-cuda.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_optimizers.dir/DependInfo.cmake"
+  "tests/CMakeFiles/test_cuda_optimizers.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_optimatrix_kernels.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_benchmarks.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_convnd.dir/DependInfo.cmake"
@@ -78,4 +82,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "tests/CMakeFiles/test_optimizers_new.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_simple.dir/DependInfo.cmake"
   "tests/CMakeFiles/test_benchmarks_new.dir/DependInfo.cmake"
+  "tests/CMakeFiles/test_gpu_simple.dir/DependInfo.cmake"
   )

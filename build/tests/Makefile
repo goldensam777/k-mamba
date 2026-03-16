@@ -186,6 +186,20 @@ test_optimizers/fast:
 .PHONY : test_optimizers/fast
 
 # Convenience name for target.
+tests/CMakeFiles/test_cuda_optimizers.dir/rule:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/test_cuda_optimizers.dir/rule
+.PHONY : tests/CMakeFiles/test_cuda_optimizers.dir/rule
+
+# Convenience name for target.
+test_cuda_optimizers: tests/CMakeFiles/test_cuda_optimizers.dir/rule
+.PHONY : test_cuda_optimizers
+
+# fast build rule for target.
+test_cuda_optimizers/fast:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/build
+.PHONY : test_cuda_optimizers/fast
+
+# Convenience name for target.
 tests/CMakeFiles/test_optimatrix_kernels.dir/rule:
 	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/test_optimatrix_kernels.dir/rule
 .PHONY : tests/CMakeFiles/test_optimatrix_kernels.dir/rule
@@ -325,6 +339,44 @@ test_benchmarks_new/fast:
 	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks_new.dir/build.make tests/CMakeFiles/test_benchmarks_new.dir/build
 .PHONY : test_benchmarks_new/fast
 
+# Convenience name for target.
+tests/CMakeFiles/test_gpu_simple.dir/rule:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/test_gpu_simple.dir/rule
+.PHONY : tests/CMakeFiles/test_gpu_simple.dir/rule
+
+# Convenience name for target.
+test_gpu_simple: tests/CMakeFiles/test_gpu_simple.dir/rule
+.PHONY : test_gpu_simple
+
+# fast build rule for target.
+test_gpu_simple/fast:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/build
+.PHONY : test_gpu_simple/fast
+
+__/optimatrix/src/optimizer_utils.o: __/optimatrix/src/optimizer_utils.cu.o
+.PHONY : __/optimatrix/src/optimizer_utils.o
+
+# target to build an object file
+__/optimatrix/src/optimizer_utils.cu.o:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/__/optimatrix/src/optimizer_utils.cu.o
+.PHONY : __/optimatrix/src/optimizer_utils.cu.o
+
+__/optimatrix/src/optimizer_utils.i: __/optimatrix/src/optimizer_utils.cu.i
+.PHONY : __/optimatrix/src/optimizer_utils.i
+
+# target to preprocess a source file
+__/optimatrix/src/optimizer_utils.cu.i:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/__/optimatrix/src/optimizer_utils.cu.i
+.PHONY : __/optimatrix/src/optimizer_utils.cu.i
+
+__/optimatrix/src/optimizer_utils.s: __/optimatrix/src/optimizer_utils.cu.s
+.PHONY : __/optimatrix/src/optimizer_utils.s
+
+# target to generate assembly for a file
+__/optimatrix/src/optimizer_utils.cu.s:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/__/optimatrix/src/optimizer_utils.cu.s
+.PHONY : __/optimatrix/src/optimizer_utils.cu.s
+
 end_to_end/test_kmamba_inference.o: end_to_end/test_kmamba_inference.c.o
 .PHONY : end_to_end/test_kmamba_inference.o
 
@@ -397,6 +449,30 @@ end_to_end/test_kmamba_training.c.s:
 	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_kmamba_training.dir/build.make tests/CMakeFiles/test_kmamba_training.dir/end_to_end/test_kmamba_training.c.s
 .PHONY : end_to_end/test_kmamba_training.c.s
 
+gpu/test_gpu_simple.o: gpu/test_gpu_simple.cu.o
+.PHONY : gpu/test_gpu_simple.o
+
+# target to build an object file
+gpu/test_gpu_simple.cu.o:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/gpu/test_gpu_simple.cu.o
+.PHONY : gpu/test_gpu_simple.cu.o
+
+gpu/test_gpu_simple.i: gpu/test_gpu_simple.cu.i
+.PHONY : gpu/test_gpu_simple.i
+
+# target to preprocess a source file
+gpu/test_gpu_simple.cu.i:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/gpu/test_gpu_simple.cu.i
+.PHONY : gpu/test_gpu_simple.cu.i
+
+gpu/test_gpu_simple.s: gpu/test_gpu_simple.cu.s
+.PHONY : gpu/test_gpu_simple.s
+
+# target to generate assembly for a file
+gpu/test_gpu_simple.cu.s:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/gpu/test_gpu_simple.cu.s
+.PHONY : gpu/test_gpu_simple.cu.s
+
 integration/test_benchmarks.o: integration/test_benchmarks.c.o
 .PHONY : integration/test_benchmarks.o
 
@@ -447,6 +523,30 @@ integration/test_convnd.s: integration/test_convnd.c.s
 integration/test_convnd.c.s:
 	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_convnd.dir/build.make tests/CMakeFiles/test_convnd.dir/integration/test_convnd.c.s
 .PHONY : integration/test_convnd.c.s
+
+test_cuda_optimizers.o: test_cuda_optimizers.cu.o
+.PHONY : test_cuda_optimizers.o
+
+# target to build an object file
+test_cuda_optimizers.cu.o:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/test_cuda_optimizers.cu.o
+.PHONY : test_cuda_optimizers.cu.o
+
+test_cuda_optimizers.i: test_cuda_optimizers.cu.i
+.PHONY : test_cuda_optimizers.i
+
+# target to preprocess a source file
+test_cuda_optimizers.cu.i:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/test_cuda_optimizers.cu.i
+.PHONY : test_cuda_optimizers.cu.i
+
+test_cuda_optimizers.s: test_cuda_optimizers.cu.s
+.PHONY : test_cuda_optimizers.s
+
+# target to generate assembly for a file
+test_cuda_optimizers.cu.s:
+	cd /home/samuel-yevi/Dev/optimus/k-mamba/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/test_cuda_optimizers.cu.s
+.PHONY : test_cuda_optimizers.cu.s
 
 test_optimizers.o: test_optimizers.c.o
 .PHONY : test_optimizers.o
@@ -584,6 +684,8 @@ help:
 	@echo "... test_benchmarks"
 	@echo "... test_benchmarks_new"
 	@echo "... test_convnd"
+	@echo "... test_cuda_optimizers"
+	@echo "... test_gpu_simple"
 	@echo "... test_gradient_utils"
 	@echo "... test_kmamba_inference"
 	@echo "... test_kmamba_inference_working"
@@ -592,6 +694,9 @@ help:
 	@echo "... test_optimizers"
 	@echo "... test_optimizers_new"
 	@echo "... test_simple"
+	@echo "... __/optimatrix/src/optimizer_utils.o"
+	@echo "... __/optimatrix/src/optimizer_utils.i"
+	@echo "... __/optimatrix/src/optimizer_utils.s"
 	@echo "... end_to_end/test_kmamba_inference.o"
 	@echo "... end_to_end/test_kmamba_inference.i"
 	@echo "... end_to_end/test_kmamba_inference.s"
@@ -601,12 +706,18 @@ help:
 	@echo "... end_to_end/test_kmamba_training.o"
 	@echo "... end_to_end/test_kmamba_training.i"
 	@echo "... end_to_end/test_kmamba_training.s"
+	@echo "... gpu/test_gpu_simple.o"
+	@echo "... gpu/test_gpu_simple.i"
+	@echo "... gpu/test_gpu_simple.s"
 	@echo "... integration/test_benchmarks.o"
 	@echo "... integration/test_benchmarks.i"
 	@echo "... integration/test_benchmarks.s"
 	@echo "... integration/test_convnd.o"
 	@echo "... integration/test_convnd.i"
 	@echo "... integration/test_convnd.s"
+	@echo "... test_cuda_optimizers.o"
+	@echo "... test_cuda_optimizers.i"
+	@echo "... test_cuda_optimizers.s"
 	@echo "... test_optimizers.o"
 	@echo "... test_optimizers.i"
 	@echo "... test_optimizers.s"

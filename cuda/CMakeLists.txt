@@ -7,22 +7,18 @@ set(CMAKE_CUDA_STANDARD 17)
 
 # Mamba-specific CUDA kernels
 set(CUDA_SRCS
-    cuda/scan1d.cu
-    cuda/scan1d_backward.cu
-    cuda/mamba_block.cu
-    cuda/mamba_block_backward.cu
-    cuda/muon.cu
-    cuda/muon_mamba.cu
-    cuda/mamba_scan.cu
+    scan1d.cu
+    scan1d_backward.cu
+    mamba_scan.cu
 )
 
 # Compile CUDA kernels
 add_library(k-mamba-cuda STATIC ${CUDA_SRCS})
 
 target_include_directories(k-mamba-cuda
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/optimatrix/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../optimatrix/include
 )
 
 # CUDA compile options

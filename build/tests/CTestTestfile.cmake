@@ -24,3 +24,7 @@ add_test(simple_test "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_sim
 set_tests_properties(simple_test PROPERTIES  _BACKTRACE_TRIPLES "/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;123;add_test;/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;0;")
 add_test(OptimizersTest "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimizers_new")
 set_tests_properties(OptimizersTest PROPERTIES  _BACKTRACE_TRIPLES "/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;127;add_test;/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;0;")
+add_test(gpu_simple_test "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple")
+set_tests_properties(gpu_simple_test PROPERTIES  _BACKTRACE_TRIPLES "/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;141;add_test;/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;0;")
+add_test(GpuSimpleTest "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple")
+set_tests_properties(GpuSimpleTest PROPERTIES  _BACKTRACE_TRIPLES "/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;144;add_test;/home/samuel-yevi/Dev/optimus/k-mamba/tests/CMakeLists.txt;0;")

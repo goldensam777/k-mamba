@@ -126,6 +126,20 @@ add_test(NAME simple_test COMMAND test_simple)
 enable_testing()
 add_test(NAME OptimizersTest COMMAND test_optimizers_new)
 
+# Tests GPU simples
 if(KMAMBA_BUILD_CUDA)
-    add_test(NAME CudaOptimizersTest COMMAND test_cuda_optimizers)
+    add_executable(test_gpu_simple gpu/test_gpu_simple.cu)
+    target_link_libraries(test_gpu_simple PRIVATE 
+        cuda
+        m
+    )
+    target_compile_options(test_gpu_simple PRIVATE
+        -O3 -mavx2 -Wall -Wextra -g
+    )
+    
+    # Ajouter aux tests CTest
+    add_test(NAME gpu_simple_test COMMAND test_gpu_simple)
+    
+    enable_testing()
+    add_test(NAME GpuSimpleTest COMMAND test_gpu_simple)
 endif()

@@ -1,10 +1,10 @@
-Start testing: Mar 16 16:46 WAT
+Start testing: Mar 16 17:01 WAT
 ----------------------------------------------------------
-1/10 Testing: optimatrix_kernels_unit
-1/10 Test: optimatrix_kernels_unit
+1/12 Testing: optimatrix_kernels_unit
+1/12 Test: optimatrix_kernels_unit
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimatrix_kernels"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"optimatrix_kernels_unit" start time: Mar 16 16:46 WAT
+"optimatrix_kernels_unit" start time: Mar 16 17:01 WAT
 Output:
 ----------------------------------------------------------
 === optimatrix Kernels Test Suite ===
@@ -27,22 +27,22 @@ All tests PASSED!
 
 === Performance Benchmarks ===
 Benchmarking GEMM performance...
-Reference: 38.321 sec (0.70 GFLOPS)
-AVX2:      34.909 sec (0.77 GFLOPS)
-Speedup:   1.10x
+Reference: 36.113 sec (0.74 GFLOPS)
+AVX2:      35.189 sec (0.76 GFLOPS)
+Speedup:   1.03x
 <end of output>
-Test time =  73.33 sec
+Test time =  71.41 sec
 ----------------------------------------------------------
 Test Passed.
-"optimatrix_kernels_unit" end time: Mar 16 16:48 WAT
-"optimatrix_kernels_unit" time elapsed: 00:01:13
+"optimatrix_kernels_unit" end time: Mar 16 17:02 WAT
+"optimatrix_kernels_unit" time elapsed: 00:01:11
 ----------------------------------------------------------
 
-2/10 Testing: utilitaires_unit
-2/10 Test: utilitaires_unit
+2/12 Testing: utilitaires_unit
+2/12 Test: utilitaires_unit
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_utilitaires"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"utilitaires_unit" start time: Mar 16 16:48 WAT
+"utilitaires_unit" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === optimatrix Utilitaires Test Suite ===
@@ -65,20 +65,20 @@ All tests PASSED!
 
 === Performance Benchmarks ===
 Benchmarking vector operations...
-Vector Add: 0.923 sec (1.14 G elems/sec)
+Vector Add: 0.986 sec (1.06 G elems/sec)
 <end of output>
-Test time =   1.01 sec
+Test time =   1.08 sec
 ----------------------------------------------------------
 Test Passed.
-"utilitaires_unit" end time: Mar 16 16:48 WAT
+"utilitaires_unit" end time: Mar 16 17:02 WAT
 "utilitaires_unit" time elapsed: 00:00:01
 ----------------------------------------------------------
 
-3/10 Testing: kmamba_inference_working
-3/10 Test: kmamba_inference_working
+3/12 Testing: kmamba_inference_working
+3/12 Test: kmamba_inference_working
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_inference_working"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"kmamba_inference_working" start time: Mar 16 16:48 WAT
+"kmamba_inference_working" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === KMamba Inference Test Suite (Working Version) ===
@@ -99,20 +99,20 @@ All tests PASSED!
 
 === Performance Benchmarks ===
 Benchmarking simple operations...
-Logits computation: 0.802 sec (0.04 G ops/sec)
+Logits computation: 0.822 sec (0.04 G ops/sec)
 <end of output>
-Test time =   0.81 sec
+Test time =   0.83 sec
 ----------------------------------------------------------
 Test Passed.
-"kmamba_inference_working" end time: Mar 16 16:48 WAT
+"kmamba_inference_working" end time: Mar 16 17:02 WAT
 "kmamba_inference_working" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-4/10 Testing: convnd_integration
-4/10 Test: convnd_integration
+4/12 Testing: convnd_integration
+4/12 Test: convnd_integration
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_convnd"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"convnd_integration" start time: Mar 16 16:48 WAT
+"convnd_integration" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === ConvND Integration Test Suite ===
@@ -130,22 +130,22 @@ All tests PASSED!
 === Performance Benchmarks ===
 Benchmarking ConvND performance...
 ConvND Performance:
-  Throughput: 1.53 GB/s
-  Latency:    0.171 ms/forward
+  Throughput: 1.44 GB/s
+  Latency:    0.182 ms/forward
   Data size:  1.00 MB
 <end of output>
 Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"convnd_integration" end time: Mar 16 16:48 WAT
+"convnd_integration" end time: Mar 16 17:02 WAT
 "convnd_integration" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-5/10 Testing: kmamba_inference_e2e
-5/10 Test: kmamba_inference_e2e
+5/12 Testing: kmamba_inference_e2e
+5/12 Test: kmamba_inference_e2e
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_inference"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"kmamba_inference_e2e" start time: Mar 16 16:48 WAT
+"kmamba_inference_e2e" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === KMamba Inference Test Suite ===
@@ -165,22 +165,22 @@ All tests PASSED!
 === Performance Benchmarks ===
 Benchmarking inference performance...
 Inference Performance:
-  Throughput: 3998.92 tokens/sec
-  Latency:    32.009 ms/forward
+  Throughput: 3761.33 tokens/sec
+  Latency:    34.030 ms/forward
   Model size: 3343872 parameters
 <end of output>
-Test time =   3.26 sec
+Test time =   3.48 sec
 ----------------------------------------------------------
 Test Passed.
-"kmamba_inference_e2e" end time: Mar 16 16:48 WAT
+"kmamba_inference_e2e" end time: Mar 16 17:02 WAT
 "kmamba_inference_e2e" time elapsed: 00:00:03
 ----------------------------------------------------------
 
-6/10 Testing: kmamba_training_e2e
-6/10 Test: kmamba_training_e2e
+6/12 Testing: kmamba_training_e2e
+6/12 Test: kmamba_training_e2e
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_kmamba_training"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"kmamba_training_e2e" start time: Mar 16 16:48 WAT
+"kmamba_training_e2e" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === KMamba Training Test Suite ===
@@ -202,21 +202,21 @@ All tests PASSED!
 === Performance Benchmarks ===
 Benchmarking training performance...
 Training Performance:
-  Throughput: 9468.34 tokens/sec
-  Latency:    6.759 ms/step
+  Throughput: 7829.50 tokens/sec
+  Latency:    8.174 ms/step
 <end of output>
-Test time =   0.35 sec
+Test time =   0.42 sec
 ----------------------------------------------------------
 Test Passed.
-"kmamba_training_e2e" end time: Mar 16 16:48 WAT
+"kmamba_training_e2e" end time: Mar 16 17:02 WAT
 "kmamba_training_e2e" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-7/10 Testing: gradient_utils_unit
-7/10 Test: gradient_utils_unit
+7/12 Testing: gradient_utils_unit
+7/12 Test: gradient_utils_unit
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gradient_utils"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"gradient_utils_unit" start time: Mar 16 16:48 WAT
+"gradient_utils_unit" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === Gradient Utils Test Suite ===
@@ -244,21 +244,21 @@ All tests PASSED!
 
 === Performance Benchmarks ===
 Benchmarking gradient operations...
-Gradient Norm: 0.330 sec (0.30 G elems/sec)
-Gradient Clip: 0.304 sec (0.33 G elems/sec)
+Gradient Norm: 0.346 sec (0.29 G elems/sec)
+Gradient Clip: 0.328 sec (0.30 G elems/sec)
 <end of output>
-Test time =   0.69 sec
+Test time =   0.74 sec
 ----------------------------------------------------------
 Test Passed.
-"gradient_utils_unit" end time: Mar 16 16:48 WAT
+"gradient_utils_unit" end time: Mar 16 17:02 WAT
 "gradient_utils_unit" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-8/10 Testing: optimizers_unit
-8/10 Test: optimizers_unit
+8/12 Testing: optimizers_unit
+8/12 Test: optimizers_unit
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimizers_new"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"optimizers_unit" start time: Mar 16 16:48 WAT
+"optimizers_unit" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === k-mamba Optimizer Test Suite ===
@@ -284,21 +284,21 @@ All tests PASSED!
 Benchmarking optimizer performance...
 Optimizer Performance:
   Parameters: 10000
-  Throughput: 71.51 M params/sec
-  Latency: 0.140 ms/step
+  Throughput: 58.10 M params/sec
+  Latency: 0.172 ms/step
 <end of output>
 Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"optimizers_unit" end time: Mar 16 16:48 WAT
+"optimizers_unit" end time: Mar 16 17:02 WAT
 "optimizers_unit" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-9/10 Testing: simple_test
-9/10 Test: simple_test
+9/12 Testing: simple_test
+9/12 Test: simple_test
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_simple"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"simple_test" start time: Mar 16 16:48 WAT
+"simple_test" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === Simple Test Suite ===
@@ -319,15 +319,15 @@ Build system working correctly!
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"simple_test" end time: Mar 16 16:48 WAT
+"simple_test" end time: Mar 16 17:02 WAT
 "simple_test" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-10/10 Testing: OptimizersTest
-10/10 Test: OptimizersTest
+10/12 Testing: OptimizersTest
+10/12 Test: OptimizersTest
 Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_optimizers_new"
 Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
-"OptimizersTest" start time: Mar 16 16:48 WAT
+"OptimizersTest" start time: Mar 16 17:02 WAT
 Output:
 ----------------------------------------------------------
 === k-mamba Optimizer Test Suite ===
@@ -353,14 +353,120 @@ All tests PASSED!
 Benchmarking optimizer performance...
 Optimizer Performance:
   Parameters: 10000
-  Throughput: 72.55 M params/sec
-  Latency: 0.138 ms/step
+  Throughput: 67.85 M params/sec
+  Latency: 0.147 ms/step
 <end of output>
 Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"OptimizersTest" end time: Mar 16 16:48 WAT
+"OptimizersTest" end time: Mar 16 17:02 WAT
 "OptimizersTest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Mar 16 16:48 WAT
+11/12 Testing: gpu_simple_test
+11/12 Test: gpu_simple_test
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"gpu_simple_test" start time: Mar 16 17:02 WAT
+Output:
+----------------------------------------------------------
+=== k-mamba GPU Test Suite (Simple) ===
+Testing basic GPU functionality
+
+Initializing GPU device...
+GPU: NVIDIA GeForce MX450 (Compute 7.5)
+Memory: 1.8 GB total, 1.7 GB free
+Testing basic GPU memory operations...
+PASS: Basic GPU memory operations
+Testing GPU vector operations...
+GPU Vector Add Performance:
+  Size: 1048576 elements
+  Bandwidth: 18.88 GB/s
+  Latency: 0.666 ms
+PASS: GPU vector operations
+Testing GPU matrix multiplication...
+GPU Matrix Multiply Performance:
+  Size: 512x512x512
+  GFLOPS: 160.91
+  Latency: 1.668 ms
+PASS: GPU matrix multiplication
+Testing GPU KMamba simulation...
+GPU KMamba Simulation Performance:
+  Model: 256 vocab, 512 dim, 128 seq_len
+  Batch: 4
+  Throughput: 895113.50 tokens/sec
+  Latency: 0.572 ms/forward
+PASS: GPU KMamba simulation
+
+=== GPU Test Results ===
+Passed: 4/4 tests
+All GPU tests PASSED!
+
+=== GPU Device Summary ===
+Device: NVIDIA GeForce MX450
+Compute: 7.5
+Memory: 1.8 GB total, 1.7 GB free
+Max Threads/Block: 1024
+Clock Rate: 1.57 GHz
+<end of output>
+Test time =   0.72 sec
+----------------------------------------------------------
+Test Passed.
+"gpu_simple_test" end time: Mar 16 17:02 WAT
+"gpu_simple_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/12 Testing: GpuSimpleTest
+12/12 Test: GpuSimpleTest
+Command: "/home/samuel-yevi/Dev/optimus/k-mamba/build/tests/test_gpu_simple"
+Directory: /home/samuel-yevi/Dev/optimus/k-mamba/build/tests
+"GpuSimpleTest" start time: Mar 16 17:02 WAT
+Output:
+----------------------------------------------------------
+=== k-mamba GPU Test Suite (Simple) ===
+Testing basic GPU functionality
+
+Initializing GPU device...
+GPU: NVIDIA GeForce MX450 (Compute 7.5)
+Memory: 1.8 GB total, 1.7 GB free
+Testing basic GPU memory operations...
+PASS: Basic GPU memory operations
+Testing GPU vector operations...
+GPU Vector Add Performance:
+  Size: 1048576 elements
+  Bandwidth: 18.39 GB/s
+  Latency: 0.684 ms
+PASS: GPU vector operations
+Testing GPU matrix multiplication...
+GPU Matrix Multiply Performance:
+  Size: 512x512x512
+  GFLOPS: 160.36
+  Latency: 1.674 ms
+PASS: GPU matrix multiplication
+Testing GPU KMamba simulation...
+GPU KMamba Simulation Performance:
+  Model: 256 vocab, 512 dim, 128 seq_len
+  Batch: 4
+  Throughput: 964626.29 tokens/sec
+  Latency: 0.531 ms/forward
+PASS: GPU KMamba simulation
+
+=== GPU Test Results ===
+Passed: 4/4 tests
+All GPU tests PASSED!
+
+=== GPU Device Summary ===
+Device: NVIDIA GeForce MX450
+Compute: 7.5
+Memory: 1.8 GB total, 1.7 GB free
+Max Threads/Block: 1024
+Clock Rate: 1.57 GHz
+<end of output>
+Test time =   0.58 sec
+----------------------------------------------------------
+Test Passed.
+"GpuSimpleTest" end time: Mar 16 17:02 WAT
+"GpuSimpleTest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Mar 16 17:02 WAT

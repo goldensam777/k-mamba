@@ -1,0 +1,1 @@
+  -L"/usr/lib/gcc/x86_64-linux-gnu/13"  "../cuda/libk-mamba-cuda.a" -lcublas -lcusolver -lcuda -lm "../optimatrix/liboptimatrix-cpu.a" -lcudart -lm -lcudadevrt -lcudart_static -lrt -lpthread -ldl 

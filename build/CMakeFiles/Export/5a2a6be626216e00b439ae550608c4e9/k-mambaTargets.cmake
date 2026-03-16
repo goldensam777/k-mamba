@@ -19,7 +19,7 @@ set(CMAKE_IMPORT_FILE_VERSION 1)
 set(_cmake_targets_defined "")
 set(_cmake_targets_not_defined "")
 set(_cmake_expected_targets "")
-foreach(_cmake_expected_target IN ITEMS k-mamba::k-mamba k-mamba::k-mamba-cpu)
+foreach(_cmake_expected_target IN ITEMS k-mamba::k-mamba k-mamba::k-mamba-cpu k-mamba::k-mamba-cuda)
   list(APPEND _cmake_expected_targets "${_cmake_expected_target}")
   if(TARGET "${_cmake_expected_target}")
     list(APPEND _cmake_targets_defined "${_cmake_expected_target}")
@@ -60,7 +60,7 @@ add_library(k-mamba::k-mamba STATIC IMPORTED)
 
 set_target_properties(k-mamba::k-mamba PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "optimatrixoptimatrix;k-mamba::k-mamba-cpu"
+  INTERFACE_LINK_LIBRARIES "optimatrixoptimatrix;k-mamba::k-mamba-cpu;k-mamba::k-mamba-cuda"
 )
 
 # Create imported target k-mamba::k-mamba-cpu
@@ -68,6 +68,13 @@ add_library(k-mamba::k-mamba-cpu STATIC IMPORTED)
 
 set_target_properties(k-mamba::k-mamba-cpu PROPERTIES
   INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:m>"
+)
+
+# Create imported target k-mamba::k-mamba-cuda
+add_library(k-mamba::k-mamba-cuda STATIC IMPORTED)
+
+set_target_properties(k-mamba::k-mamba-cuda PROPERTIES
+  INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:cuda>;\$<LINK_ONLY:cudart>"
 )
 
 if(CMAKE_VERSION VERSION_LESS 2.8.12)

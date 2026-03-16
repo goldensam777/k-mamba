@@ -211,6 +211,19 @@ k-mamba-cpu/fast:
 .PHONY : k-mamba-cpu/fast
 
 #=============================================================================
+# Target rules for targets named k-mamba-cuda
+
+# Build rule for target.
+k-mamba-cuda: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 k-mamba-cuda
+.PHONY : k-mamba-cuda
+
+# fast build rule for target.
+k-mamba-cuda/fast:
+	$(MAKE) $(MAKESILENT) -f cuda/CMakeFiles/k-mamba-cuda.dir/build.make cuda/CMakeFiles/k-mamba-cuda.dir/build
+.PHONY : k-mamba-cuda/fast
+
+#=============================================================================
 # Target rules for targets named test_optimizers
 
 # Build rule for target.
@@ -222,6 +235,19 @@ test_optimizers: cmake_check_build_system
 test_optimizers/fast:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_optimizers.dir/build.make tests/CMakeFiles/test_optimizers.dir/build
 .PHONY : test_optimizers/fast
+
+#=============================================================================
+# Target rules for targets named test_cuda_optimizers
+
+# Build rule for target.
+test_cuda_optimizers: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_cuda_optimizers
+.PHONY : test_cuda_optimizers
+
+# fast build rule for target.
+test_cuda_optimizers/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_cuda_optimizers.dir/build.make tests/CMakeFiles/test_cuda_optimizers.dir/build
+.PHONY : test_cuda_optimizers/fast
 
 #=============================================================================
 # Target rules for targets named test_optimatrix_kernels
@@ -353,6 +379,19 @@ test_benchmarks_new/fast:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_benchmarks_new.dir/build.make tests/CMakeFiles/test_benchmarks_new.dir/build
 .PHONY : test_benchmarks_new/fast
 
+#=============================================================================
+# Target rules for targets named test_gpu_simple
+
+# Build rule for target.
+test_gpu_simple: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_gpu_simple
+.PHONY : test_gpu_simple
+
+# fast build rule for target.
+test_gpu_simple/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/test_gpu_simple.dir/build.make tests/CMakeFiles/test_gpu_simple.dir/build
+.PHONY : test_gpu_simple/fast
+
 src/convnd.o: src/convnd.c.o
 .PHONY : src/convnd.o
 
@@ -440,10 +479,13 @@ help:
 	@echo "... test"
 	@echo "... k-mamba"
 	@echo "... k-mamba-cpu"
+	@echo "... k-mamba-cuda"
 	@echo "... optimatrix-cpu"
 	@echo "... test_benchmarks"
 	@echo "... test_benchmarks_new"
 	@echo "... test_convnd"
+	@echo "... test_cuda_optimizers"
+	@echo "... test_gpu_simple"
 	@echo "... test_gradient_utils"
 	@echo "... test_kmamba_inference"
 	@echo "... test_kmamba_inference_working"
