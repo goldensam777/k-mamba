@@ -31,19 +31,42 @@ k-mamba/
 ├── include/
 │   └── kmamba.h              # API publique (KMamba, KMambaConfig)
 ├── src/
-│   └── kmamba.c              # Forward, backward, batch training, checkpoint I/O
-├── optimatrix/               # Submodule git — moteur de calcul
-│   ├── include/optimatrix.h  # API calcul (kernels ASM + C)
-│   ├── src/                  # Kernels ASM AVX2 + MambaBlock
-│   └── CMakeLists.txt        # Export optimatrix::optimatrix
+│   ├── kmamba.c              # Forward, backward, batch training, checkpoint I/O
+│   ├── mamba_block.c         # Bloc SSM (projections, scan dispatch, MUON)
+│   └── convnd.c              # Convolution ND (appelle optimatrix conv1d)
+├── cpu/                      # Scan SSM CPU (propre à k-mamba, PAS dans optimatrix)
+│   ├── scan1d.asm            # Scan sélectif 1D forward (ASM AVX2)
+│   ├── scan2d.asm            # Scan sélectif 2D wavefront (ASM)
+│   ├── scan1d_backward.c     # Backward 1D (M générique, C)
+│   ├── scan1d_backward_m.c   # Backward 1D (M > 1)
+│   ├── scan1d_backward_m1_shared_bc.asm      # Backward M=1 (ASM — bug connu)
+│   ├── scan1d_backward_m1_shared_bc_simple.asm  # Variante simplifiée
+│   └── mamba_scan.c          # Dispatch CPU : choisit la routine scan
+├── cuda/                     # Scan SSM CUDA (Blelloch — propre à k-mamba)
+│   ├── scan1d.cu             # Blelloch parallel prefix scan 1D
+│   ├── scan1d_backward.cu    # Backward scan 1D CUDA
+│   └── mamba_scan.cu         # Dispatch CUDA
+├── optimatrix/               # Submodule git — moteur de calcul GÉNÉRIQUE
+│   ├── include/optimatrix.h  # API C (extern "C" pour compatibilité NVCC)
+│   ├── cpu/                  # Kernels CPU génériques (GEMM, activations, conv, optim)
+│   │   ├── gemm*.asm, gemv*.asm
+│   │   ├── activations.asm, hadamard.asm
+│   │   ├── conv1d_avx2.asm
+│   │   └── optimizer_utils.c  # Gradient clipping, AdamW, MUON CPU
+│   └── cuda/                 # Kernels CUDA génériques (optimiseurs uniquement)
+│       └── optimizer_utils.cu # Gradient clipping, AdamW, MUON CUDA ✅ testé
+├── tests/
+│   ├── unit/test_optimatrix_kernels.c  # GEMM/GEMV (5/5 ✅)
+│   ├── unit/test_optimizers.c          # CPU optimizers (2/2 ✅)
+│   └── cuda/test_cuda_optimizers.cu    # CUDA optimizers (4/4 ✅)
+├── bench/
+│   └── bench_paper.c         # G1-G7 benchmarks (GEMM, wavefront, Blelloch, roofline)
+├── paper/
+│   ├── kmamba.tex             # Paper arXiv LaTeX (Theorem wavefront + Blelloch algo)
+│   └── kmamba.bib             # BibTeX
 ├── cmake/
 │   └── k-mambaConfig.cmake.in
-├── CMakeLists.txt            # Export k-mamba::k-mamba
-├── README.md                 # Vue d'ensemble + innovations
-├── THEORY.md                 # Fondement mathématique Mamba-ND
-├── ESTIMATIONS.md            # Complexité et benchmarks
-├── ARCHITECTURE.md           # Philosophie Volontés/Puissance
-└── data/                     # Corpus d'entraînement (texte brut)
+└── CMakeLists.txt            # Export k-mamba::k-mamba
 ```
 
 ---
@@ -52,20 +75,33 @@ k-mamba/
 
 ```bash
 # Cloner avec submodule
-git clone --recursive https://github.com/user/k-mamba
-cd k-mamba && mkdir build && cd build
+git clone --recursive https://github.com/goldensam777/k-mamba
+cd k-mamba
 
-# Compiler
-cmake ..
-make -j
-sudo make install  # Optionnel
+# CPU seul
+cmake -B build -DKMAMBA_BUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build        # 3 suites
 
-# Utilisation dans un autre projet
+# CPU + CUDA (MX450 = sm_75)
+cmake -B build-cuda -DKMAMBA_BUILD_CUDA=ON -DKMAMBA_BUILD_TESTS=ON
+# IMPORTANT : le flag CUDA d'optimatrix doit être forcé dans le cache
+sed -i 's/OPTIMATRIX_BUILD_CUDA:BOOL=OFF/OPTIMATRIX_BUILD_CUDA:BOOL=ON/' build-cuda/CMakeCache.txt
+cmake build-cuda && cmake --build build-cuda -j
+ctest --test-dir build-cuda   # 4 suites (dont CudaOptimizersTest 4/4 ✅)
+
+# Benchmarks paper
+cmake -B build-bench -DKMAMBA_BUILD_BENCH=ON
+cmake --build build-bench --target bench_paper
+./build-bench/bench/bench_paper
+
+# Utilisation dans un autre projet CMake
 find_package(k-mamba REQUIRED)
 target_link_libraries(mon_app PRIVATE k-mamba::k-mamba)
 ```
 
-Requiert : `gcc >= 11`, `nasm >= 2.15`, `cmake >= 3.18`, CPU avec AVX2.
+Requiert : `gcc >= 11`, `nasm >= 2.15`, `cmake >= 3.18`, CPU AVX2.
+CUDA optionnel : `nvcc >= 12.0`, GPU avec sm_75+ (Tesla Turing ou supérieur).
 
 ---
 
@@ -130,22 +166,32 @@ kmamba_free(m);
 
 **Règle** : Si c'est trivial (embedding, softmax, loss, orchestration), ça va dans k-mamba.
 
-### optimatrix (Puissance — submodule)
+### k-mamba/cpu/ et k-mamba/cuda/ (scans SSM — logique Mamba)
 
 | Kernel | Implémentation |
 |--------|---------------|
-| GEMM / GEMV | ASM AVX2 (vfmadd231ps) |
-| Selective scan 1D forward | ASM |
-| Selective scan 1D backward | ASM (M=1) + C (M générique) |
-| Selective scan 2D | ASM wavefront anti-diagonal |
-| Conv1D depthwise | ASM AVX2 |
-| ConvND séparable | C (forward + backward ND complet) |
-| Activations (SiLU, Sigmoid, Softplus) | ASM |
-| Hadamard product | ASM AVX2 |
-| MambaBlock (forward/backward 1D+2D) | C (appelle les kernels ASM) |
-| Optimiseur MUONCLIP | C (Newton-Schulz) |
+| Selective scan 1D forward | `cpu/scan1d.asm` (ASM AVX2) |
+| Selective scan 1D backward | `cpu/scan1d_backward*.c/.asm` |
+| Selective scan 2D wavefront | `cpu/scan2d.asm` (ASM) |
+| CUDA scan 1D (Blelloch) | `cuda/scan1d.cu` |
+| CUDA scan backward | `cuda/scan1d_backward.cu` |
 
-**Règle** : Si c'est du calcul lourd qui boucle des millions de fois, ça va dans optimatrix.
+Les scans sont dans k-mamba parce qu'ils encodent la logique SSM (structure du monoid, ZOH).
+**Ne pas les déplacer dans optimatrix.**
+
+### optimatrix (Puissance — submodule, kernels GÉNÉRIQUES)
+
+| Kernel | Implémentation |
+|--------|---------------|
+| GEMM / GEMV | `cpu/gemm*.asm, gemv*.asm` (scalaire + AVX2) |
+| Conv1D depthwise | `cpu/conv1d_avx2.asm` (ASM AVX2) |
+| ConvND séparable | `cpu/generic_ops.c` (forward + backward ND) |
+| Activations (SiLU, Sigmoid, Softplus, ReLU) | `cpu/activations.asm` |
+| Hadamard product | `cpu/hadamard.asm` (AVX2) |
+| Gradient clipping, AdamW, MUON (CPU) | `cpu/optimizer_utils.c` |
+| Gradient clipping, AdamW, MUON (CUDA) | `cuda/optimizer_utils.cu` ✅ |
+
+**Règle** : optimatrix = calcul matriciel générique, réutilisable hors Mamba. Pas de logique SSM.
 
 ---
 

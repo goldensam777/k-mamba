@@ -18,7 +18,7 @@ Cette séparation n'est pas technique seulement — elle est **philosophique**. 
 |---------|-------------------|----------------------|
 | Complexité | Triviale (5-10 lignes) | Intensive (millions d'itérations) |
 | Abstraction | Logique modèle, I/O | Kernels mathématiques purs |
-| Langage | C pur, lisible | C + ASM AVX2 |
+| Langage | C pur, lisible | C + ASM AVX2 + CUDA |
 | Optimisation | Clarté | Performance maximale |
 | Couverture | Architecture complète | Compute engine réutilisable |
 
@@ -38,29 +38,23 @@ k-mamba/ — Les Volontés (orchestration du modèle Mamba)
 │       kmamba_save/load
 │
 ├── src/
-│   ├── kmamba.c
-│   │   └── Implémentation principale :
-│   │       ├── Embedding lookup (memcpy ligne de table)
-│   │       ├── Softmax stable (exp(x-max)/sum)
-│   │       ├── Cross-entropy (-log(p_target))
-│   │       ├── Training loop (accumulation gradients)
-│   │       └── Checkpoint I/O (format binaire "KMAMBA")
-│   │
-│   ├── mamba_block.c
-│   │   └── Bloc SSM complet avec MUON :
-│   │       ├── Forward 1D/2D (appelle optimatrix)
-│   │       ├── Backward (appelle optimatrix)
-│   │       ├── Optimiseur MUONCLIP
-│   │       └── Gestion des buffers
-│   │
-│   └── convnd.c
-│       └── Convolution ND (logique modèle) :
-│           ├── Appelle conv1d_avx2 (optimatrix)
-│           ├── Gestion des dépendances ND
-│           └── Workspace pour backward
+│   ├── kmamba.c           — Embedding, softmax, cross-entropy, training loop, checkpoint I/O
+│   ├── mamba_block.c      — Bloc SSM : projections, scan dispatch, MUONCLIP, buffers
+│   └── convnd.c           — Convolution ND (appelle conv1d_avx2 d'optimatrix)
+│
+├── cpu/                   — Kernels scan SSM (logique Mamba, CPU)
+│   ├── scan1d.asm         — Scan sélectif 1D forward (ASM)
+│   ├── scan2d.asm         — Scan sélectif 2D wavefront (ASM)
+│   ├── scan1d_backward*.c/.asm  — Backward 1D (C générique + ASM M=1)
+│   └── mamba_scan.c       — Dispatch CPU
+│
+├── cuda/                  — Kernels scan SSM (Blelloch, CUDA)
+│   ├── scan1d.cu          — Blelloch parallel prefix scan 1D
+│   ├── scan1d_backward.cu — Backward scan 1D CUDA
+│   └── mamba_scan.cu      — Dispatch CUDA
 │
 ├── optimatrix/ (submodule)
-│   └── Moteur de calcul — voir section dédiée
+│   └── Moteur de calcul GÉNÉRIQUE — voir section dédiée
 │
 └── CMakeLists.txt
     └── Export k-mamba::k-mamba avec find_package support
@@ -71,30 +65,30 @@ k-mamba/ — Les Volontés (orchestration du modèle Mamba)
 ## Structure d'optimatrix
 
 ```
-optimatrix/ — La Puissance (kernels génériques réutilisables)
+optimatrix/ — La Puissance (kernels GÉNÉRIQUES réutilisables, sans logique SSM)
 │
 ├── include/optimatrix.h
-│   └── API calcul générique :
-│       ├── GEMM/GEMV (AVX2)
-│       ├── Conv1D depthwise (AVX2)
-│       ├── Scan 1D/2D (ASM wavefront)
-│       ├── Activations (SiLU, Sigmoid, Softplus)
+│   └── API calcul générique (extern "C" — compatible NVCC) :
+│       ├── GEMM/GEMV (scalaire + AVX2)
+│       ├── Conv1D depthwise (AVX2) + ConvND séparable (C)
+│       ├── Activations : SiLU, Sigmoid, Softplus, ReLU (AVX2)
 │       ├── Hadamard (AVX2)
-│       └── Structures pour scans (forward + backward)
+│       └── Optimiseurs : gradient_clip, AdamW, MUON (CPU + CUDA)
 │
-└── src/
-    ├── gemm.asm, gemm_avx2.asm      ← GEMM scalaire + AVX2
-    ├── gemv.asm, gemv_avx2.asm      ← GEMV scalaire + AVX2
-    ├── hadamard.asm                  ← Produit élément par élément
-    ├── activations.asm               ← SiLU, Sigmoid, Softplus (AVX2)
-    ├── conv1d_avx2.asm              ← Conv1D depthwise causale
-    ├── scan1d.asm                   ← Scan sélectif 1D forward
-    ├── scan2d.asm                   ← Scan sélectif 2D wavefront
-    ├── scan1d_backward.c            ← Backward 1D complet
-    ├── scan1d_backward_m.c          ← Backward M>1 générique
-    ├── scan1d_backward_m1_shared_bc.asm      ← Optimisation M=1
-    └── scan1d_backward_m1_shared_bc_simple.asm  ← Version simplifiée
+├── cpu/
+│   ├── gemm.asm, gemm_avx2.asm      ← GEMM scalaire + AVX2
+│   ├── gemv.asm, gemv_avx2.asm      ← GEMV scalaire + AVX2
+│   ├── hadamard.asm                  ← Produit élément par élément
+│   ├── activations.asm               ← SiLU, Sigmoid, Softplus (AVX2)
+│   ├── conv1d_avx2.asm              ← Conv1D depthwise causale
+│   ├── generic_ops.c                ← ConvND séparable forward+backward
+│   └── optimizer_utils.c            ← Gradient clipping, AdamW, MUON CPU
+│
+└── cuda/
+    └── optimizer_utils.cu           ← Gradient clipping, AdamW, MUON CUDA ✅
 ```
+
+**Les scans (scan1d.asm, scan2d.asm, scan1d_backward.c, scan1d.cu…) sont dans `k-mamba/cpu/` et `k-mamba/cuda/`, pas dans optimatrix.**
 
 ---
 
@@ -115,14 +109,14 @@ Appel utilisateur
                                    │
        ▼                           │
 ┌─────────────────────────────────┐
-│ optimatrix (appelé par k-mamba)│
-│ 1. gemv_avx2(W_in, x)               │
-│ 2. silu_f32()                          │
-│ 3. gemv_avx2(delta_proj, x)         │
-│ 4. softplus + clamp                 │
-│ 5. scan1d() or scan2d()             │
-│ 6. gemv_avx2(W_out, h)              │
-│    └──> retourne à k-mamba       │
+│ mamba_block_forward() (k-mamba) │
+│ 1. gemv_avx2(W_in, x)           │  ← optimatrix
+│ 2. silu_f32()                   │  ← optimatrix
+│ 3. gemv_avx2(delta_proj, x)     │  ← optimatrix
+│ 4. softplus + clamp             │  ← optimatrix
+│ 5. scan1d() or scan2d()         │  ← k-mamba/cpu/ (ASM)
+│ 6. gemv_avx2(W_out, h)          │  ← optimatrix
+│    └──> retourne à k-mamba      │
 └─────────────────────────────────┘
                                    │
        ▼                           │
@@ -154,14 +148,14 @@ Appel utilisateur
 └─────────────────────────────────────┘
                                    │
        ▼                           
-┌──────────────────────────────────┼───┐
-│ optimatrix : mamba_backward()    │   │
-│  1. Recompute forward (store)        │
-│  2. Backprop W_out (GEMM)            │
-│  3. scan1d_backward() (ASM/C)        │
-│  4. Backprop SiLU                    │
-│  5. Backprop W_in (GEMM)             │
-│  6. Accumulation gradients           │
+┌───────────────────────────────────────┐
+│ mamba_backward() (k-mamba)            │
+│  1. Recompute forward (store)         │
+│  2. Backprop W_out (GEMM)             │  ← optimatrix
+│  3. scan1d_backward() (ASM/C)         │  ← k-mamba/cpu/
+│  4. Backprop SiLU                     │  ← optimatrix
+│  5. Backprop W_in (GEMM)              │  ← optimatrix
+│  6. Accumulation gradients            │
 └───────────────────────────────────────┘
 
                      ▼
@@ -221,9 +215,9 @@ c'est un conflit d'intentions — résolu par l'ordonnancement de k-mamba.
 ### 1. Réutilisabilité
 
 optimatrix peut être utilisé par d'autres projets (pas seulement Mamba) :
-- Traitement d'images (ConvND)
-- Séries temporelles (Scan 1D)
-- Algèbre linéaire (GEMM)
+- Traitement d'images (ConvND séparable)
+- Algèbre linéaire (GEMM/GEMV AVX2)
+- Optimisation (gradient clipping, AdamW, MUON — CPU + CUDA)
 
 ### 2. Testabilité
 

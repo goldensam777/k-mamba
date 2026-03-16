@@ -72,12 +72,12 @@ Implémentation C/ASM de l'optimiseur MUON (arXiv:2502.16982, Moonshot AI) :
 - Weight decay découplé
 - **Pas de dépendance PyTorch** — production pure C
 
-### 4. Zero-Dependency SSM
+### 4. Backend duel CPU/CUDA
 
-- Pas de Python, pas de GPU, pas de CUDA
-- libc + libm seulement
-- Temps de démarrage ~0, footprint minimal
-- Déployable sur CPU edge (embarqué, IoT)
+- **CPU pur** : libc + libm, zéro dépendance — déployable sur CPU edge (embarqué, IoT)
+- **Backend CUDA** (optionnel) : gradient_clip, AdamW, MUON sur GPU — testé sur MX450 (sm_75)
+- **CUDA scan** (optionnel) : Blelloch parallel prefix scan pour accélérer les scans SSM sur GPU
+- Pas de Python, pas de PyTorch
 
 ### 5. Théorie des Volontés
 
@@ -99,6 +99,15 @@ k-mamba/                              ← Bibliothèque principale (modèle Mamb
 │   ├── kmamba.c                   # Orchestration du modèle
 │   ├── mamba_block.c              # Bloc SSM complet avec MUON
 │   └── convnd.c                  # Convolution ND (logique modèle)
+├── cpu/                           # Kernels scan k-mamba (CPU)
+│   ├── scan1d.asm                 # Scan sélectif 1D forward
+│   ├── scan2d.asm                 # Scan sélectif 2D wavefront
+│   ├── scan1d_backward*.c/.asm    # Backward 1D (C générique + ASM M=1)
+│   └── mamba_scan.c              # Dispatch CPU scan
+├── cuda/                          # Kernels scan k-mamba (CUDA)
+│   ├── scan1d.cu                  # Blelloch scan 1D CUDA
+│   ├── scan1d_backward.cu         # Backward scan 1D CUDA
+│   └── mamba_scan.cu             # Dispatch CUDA scan
 ├── optimatrix/                    # Submodule git — moteur de calcul matriciel
 │   ├── include/optimatrix.h       # API (extern "C" pour CUDA)
 │   ├── cpu/
@@ -108,7 +117,12 @@ k-mamba/                              ← Bibliothèque principale (modèle Mamb
 │   │   ├── hadamard.asm           # Produit Hadamard AVX2
 │   │   └── optimizer_utils.c      # Gradient clipping, AdamW, MUON CPU
 │   └── cuda/
-│       └── optimizer_utils.cu     # Gradient clipping, AdamW, MUON CUDA
+│       └── optimizer_utils.cu     # Gradient clipping, AdamW, MUON CUDA ✅ testé
+├── bench/                         # Benchmarks pour le paper
+│   └── bench_paper.c             # G1-G7 : GEMM, wavefront, Blelloch, roofline
+├── paper/                         # Publication arXiv
+│   ├── kmamba.tex                 # Paper LaTeX (arXiv style, deux colonnes)
+│   └── kmamba.bib                 # Bibliographie BibTeX
 ├── cmake/
 │   └── k-mambaConfig.cmake.in
 ├── CMakeLists.txt
@@ -147,9 +161,11 @@ cmake build-cuda && cmake --build build-cuda -j
 ### Tests
 
 ```bash
-ctest --test-dir build          # CPU : 3 tests
-ctest --test-dir build-cuda     # CPU + CUDA : 3 tests dont CudaOptimizersTest
+ctest --test-dir build          # CPU : 3 suites (optimatrix kernels, optimizers, mamba_block)
+ctest --test-dir build-cuda     # CPU + CUDA : 4 suites dont CudaOptimizersTest (4/4 ✅)
 ```
+
+Résultats validés (17 mars 2026, MX450 sm_75) : voir **[TEST_RESULTS.md](TEST_RESULTS.md)**.
 
 ### Usage dans un projet CMake
 
@@ -270,6 +286,9 @@ output [seq_len × dim]
 - **[THEORY.md](THEORY.md)** — Fondement mathématique du scan Mamba-ND
 - **[ESTIMATIONS.md](ESTIMATIONS.md)** — Complexité théorique et benchmarks mesurés
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — Philosophie Volontés/Puissance
+- **[TEST_RESULTS.md](TEST_RESULTS.md)** — Résultats de tests CPU + CUDA (17/03/2026)
+- **[SOURCES.md](SOURCES.md)** — Bibliographie complète avec tags de citation
+- **[paper/kmamba.tex](paper/kmamba.tex)** — Paper arXiv en LaTeX
 
 ---
 
