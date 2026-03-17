@@ -1,24 +1,48 @@
-; scan1d_backward_m1_shared_bc.asm - Version simplifiée et corrigée
-; 
-; NASM implementation of the critical backward pass kernel
-; Optimized for M=1 with shared B/C computation
-; Target: x86-64 System V ABI, AVX2
+; scan1d_backward_m1_shared_bc_simple.asm — Scalar backward pass
+;
+; Pure scalar version (no AVX2 inner loop).
+; Same logic as the C scalar implementation, just in ASM.
+; Requires A_diag precomputed; falls back to Taylor exp if NULL.
+;
+; Target: x86-64 System V ABI
+;
+; Register allocation (callee-saved):
+;   r15 = p            (struct pointer)
+;   r14 = adj_h        (calloc'd buffer, [D] floats)
+;   r13 = D
+;   r12 = t            (time counter, L-1 downto 0)
+;   rbx = d            (dimension counter in inner loop)
+;
+; ScanBackwardSharedParams layout:
+;   [p+0]   x       [L*D]       [p+64]  dy       [L*D]
+;   [p+8]   A       [D]         [p+72]  dx       [L*D]
+;   [p+16]  A_diag  [L*D]/NULL  [p+80]  dA       [D]
+;   [p+24]  B       [D]         [p+88]  dB       [D]
+;   [p+32]  C       [D]         [p+96]  dC       [D]
+;   [p+40]  delta   [L]         [p+104] ddelta   [L]
+;   [p+48]  h0      [D]/NULL    [p+112] L
+;   [p+56]  h       [L*D]       [p+120] D
 
 %include "types.inc"
 
 extern calloc
-extern memset  
+extern memset
 extern free
+
+; Stack frame locals
+%define LOCALS      48
+%define LOC_HROW     0
+%define LOC_XROW     8
+%define LOC_DYROW   16
+%define LOC_HPREV   24
+%define LOC_DXROW   32
+%define LOC_ADIAG   40
 
 section .text
 global scan1d_backward_m1_shared_bc_simple_asm
 
-; extern void scan1d_backward_m1_shared_bc_simple_asm(ScanBackwardSharedParams *p);
-; Arguments:
-;   rdi = pointer to ScanBackwardSharedParams structure
-
 scan1d_backward_m1_shared_bc_simple_asm:
-    ; Prologue
+    ; ── Prologue ──────────────────────────────────────────────────
     push    rbp
     mov     rbp, rsp
     push    rbx
@@ -26,191 +50,240 @@ scan1d_backward_m1_shared_bc_simple_asm:
     push    r13
     push    r14
     push    r15
-    
-    ; Save parameter pointer
-    mov     rbx, rdi                    ; rbx = p
-    
-    ; Validate parameters
-    test    rdi, rdi
-    jz      .cleanup
-    
-    ; Load structure fields
-    mov     r8,  [rdi]                  ; r8  = p->x
-    mov     r9,  [rdi+8]                ; r9  = p->A  
-    mov     r10, [rdi+16]               ; r10 = p->A_diag
-    mov     r11, [rdi+24]               ; r11 = p->B
-    mov     r12, [rdi+32]               ; r12 = p->C
-    push    qword [rdi+40]              ; p->delta
-    push    qword [rdi+48]              ; p->h0
-    push    qword [rdi+56]              ; p->h
-    push    qword [rdi+64]              ; p->dy
-    push    qword [rdi+72]              ; p->dx
-    push    qword [rdi+80]              ; p->dA
-    push    qword [rdi+88]              ; p->dB
-    push    qword [rdi+96]              ; p->dC
-    push    qword [rdi+104]             ; p->ddelta
-    
-    ; Load dimensions
-    mov     rbp, [rdi+112]             ; rbp = p->L
-    mov     rdx, [rdi+120]             ; rdx = p->D
-    
-    ; Allocate adj_h array
-    mov     rdi, rdx                    ; count = D
-    mov     rsi, 4                      ; size = 4 (float)
-    call    calloc
-    mov     r14, rax                    ; r14 = adj_h
-    test    rax, rax
-    jz      .cleanup
-    
-    ; Zero output arrays
-    push    rdx                         ; save D
-    push    rbp                         ; save L
-    
-    ; Zero dx
-    mov     rdi, [rbx+64]               ; p->dx
-    mov     rcx, rbp
-    imul    rcx, rdx                    ; L * D
-    shl     rcx, 2                      ; * 4 bytes
-    xor     esi, esi
-    call    memset
-    
-    ; Zero dA
-    mov     rdi, [rbx+72]               ; p->dA
-    mov     rcx, [rsp+8]                ; restore D
-    shl     rcx, 2
-    call    memset
-    
-    ; Zero dB
-    mov     rdi, [rbx+80]               ; p->dB
-    mov     rcx, [rsp+8]                ; D
-    shl     rcx, 2
-    call    memset
-    
-    ; Zero dC
-    mov     rdi, [rbx+88]               ; p->dC
-    mov     rcx, [rsp+8]                ; D
-    shl     rcx, 2
-    call    memset
-    
-    ; Zero ddelta
-    mov     rdi, [rbx+96]               ; p->ddelta
-    mov     rcx, [rsp+16]               ; restore L
-    shl     rcx, 2
-    call    memset
-    
-    pop     rbp                         ; restore L
-    pop     rdx                         ; restore D
-    
-    ; Main backward loop: for t = L-1 downto 0
-    mov     rcx, rbp                    ; rcx = t counter
-    dec     rcx                         ; start at L-1
-    
-.time_loop:
-    test    rcx, rcx
-    jl      .cleanup
-    
-    ; Load delta[t] and broadcast
-    mov     r13, [rsp+40]             ; r13 = p->delta
-    movss   xmm0, [r13 + rcx*4]         ; delta[t]
-    
-    ; Calculate base offset
-    mov     rax, rcx                    ; t
-    imul    rax, rdx                    ; t * D
-    shl     rax, 2                      ; bytes
-    
-    ; Pointers to current row
-    mov     r15, [rsp+32]             ; r15 = p->h
-    lea     rsi, [r15 + rax]            ; &h[t*D]
-    lea     rdi, [r8 + rax]             ; &x[t*D]
-    mov     r13, [rsp+48]              ; r13 = p->dy
-    lea     r13, [r13 + rax]            ; &dy[t*D]
-    
-    ; Previous h pointer
-    test    rcx, rcx
-    jnz     .has_prev_h
-    test    r13, r13                    ; h0
-    jz      .zero_prev_h
-    mov     r13, r14                    ; use h0
-    jmp     .prev_h_ready
-.has_prev_h:
-    mov     r13, rax                    ; t*D
-    sub     r13, rdx                    ; (t-1)*D
-    shl     r13, 2                      ; *4 bytes
-    lea     r13, [r15 + r13]            ; &h[(t-1)*D]
-    jmp     .prev_h_ready
-.zero_prev_h:
-    xor     r13, r13
-.prev_h_ready:
+    sub     rsp, LOCALS
 
-    ; Scalar loop (for correctness)
-    mov     rbx, 0                      ; d counter
-.scalar_loop:
-    cmp     rbx, rdx
-    jge     .scalar_done
-    
-    ; Load values
-    movss   xmm1, [rsi + rbx*4]         ; h[t,d]
-    movss   xmm2, [rdi + rbx*4]         ; x[t,d]
-    movss   xmm3, [r9 + rbx*4]          ; A[d]
-    movss   xmm4, [r11 + rbx*4]         ; B[d]
-    movss   xmm5, [r12 + rbx*4]         ; C[d]
-    movss   xmm6, [r14 + rbx*4]         ; adj_h[d]
-    movss   xmm7, [r13 + rbx*4]         ; dy[t,d] (correction!)
-    
-    ; Compute dA = exp(delta * A) (simplified for now)
-    vmulss  xmm8, xmm0, xmm3            ; delta * A
-    vaddss  xmm8, xmm8, xmm3            ; A + delta*A (approx exp)
-    
-    ; Compute ah = adj_h + dy * c
-    vmulss  xmm9, xmm7, xmm5            ; dy * c
-    vaddss  xmm9, xmm9, xmm6            ; ah
-    
-    ; dC += dy * h
-    vmulss  xmm10, xmm7, xmm1           ; dy * h
-    mov     r15, [rsp+8]                ; p->dC
-    movss   xmm11, [r15 + rbx*4]        ; load dC
-    vaddss  xmm10, xmm11, xmm10          ; dC + dy*h
-    movss   [r15 + rbx*4], xmm10         ; store dC
-    
-    ; dB += ah * delta * x
-    vmulss  xmm10, xmm9, xmm0           ; ah * delta
-    vmulss  xmm10, xmm10, xmm2          ; * x
-    mov     r15, [rsp]                  ; p->dB
-    movss   xmm11, [r15 + rbx*4]        ; load dB
-    vaddss  xmm10, xmm11, xmm10          ; dB + ah*delta*x
-    movss   [r15 + rbx*4], xmm10         ; store dB
-    
-    ; dA += ah * delta * dA * h_prev
-    vmulss  xmm10, xmm9, xmm0           ; ah * delta
-    vmulss  xmm10, xmm10, xmm8          ; * dA
-    vmulss  xmm10, xmm10, xmm1          ; * h_prev
-    mov     r15, [rsp-8]               ; p->dA
-    movss   xmm11, [r15 + rbx*4]        ; load dA
-    vaddss  xmm10, xmm11, xmm10          ; dA + ah*delta*dA*h_prev
-    movss   [r15 + rbx*4], xmm10         ; store dA
-    
-    ; dx += ah * delta * b
-    vmulss  xmm10, xmm9, xmm0           ; ah * delta
-    vmulss  xmm10, xmm10, xmm4          ; * b
-    mov     r15, [rsp-16]              ; p->dx
-    lea     r15, [r15 + rax]            ; r15 = &dx[t*D]
-    movss   xmm11, [r15 + rbx*4]        ; load dx
-    vaddss  xmm10, xmm11, xmm10          ; dx + ah*delta*b
-    movss   [r15 + rbx*4], xmm10         ; store dx
-    
-    ; Update adj_h = ah * dA
-    vmulss  xmm6, xmm9, xmm8            ; adj_h = ah * dA
-    movss   [r14 + rbx*4], xmm6         ; store adj_h
-    
-    inc     rbx
-    jmp     .scalar_loop
-    
-.scalar_done:
-    dec     rcx
+    ; ── Validate ──────────────────────────────────────────────────
+    test    rdi, rdi
+    jz      .epilogue
+
+    mov     r15, rdi                    ; r15 = p
+    mov     r13, [r15 + 120]            ; r13 = D
+
+    ; ── calloc(D, sizeof(float)) ──────────────────────────────────
+    mov     rdi, r13
+    mov     rsi, 4
+    call    calloc
+    test    rax, rax
+    jz      .epilogue
+    mov     r14, rax                    ; r14 = adj_h
+
+    ; ── Zero output buffers ───────────────────────────────────────
+    ; dx [L*D]
+    mov     rdi, [r15 + 72]
+    xor     esi, esi
+    mov     rdx, [r15 + 112]
+    imul    rdx, r13
+    shl     rdx, 2
+    call    memset
+
+    ; dA [D]
+    mov     rdi, [r15 + 80]
+    xor     esi, esi
+    mov     rdx, r13
+    shl     rdx, 2
+    call    memset
+
+    ; dB [D]
+    mov     rdi, [r15 + 88]
+    xor     esi, esi
+    mov     rdx, r13
+    shl     rdx, 2
+    call    memset
+
+    ; dC [D]
+    mov     rdi, [r15 + 96]
+    xor     esi, esi
+    mov     rdx, r13
+    shl     rdx, 2
+    call    memset
+
+    ; ddelta [L]
+    mov     rdi, [r15 + 104]
+    xor     esi, esi
+    mov     rdx, [r15 + 112]
+    shl     rdx, 2
+    call    memset
+
+    ; ── Main loop: t = L-1 downto 0 ──────────────────────────────
+    mov     r12, [r15 + 112]
+    dec     r12
+
+.time_loop:
+    test    r12, r12
+    jl      .free_adj_h
+
+    ; ── Compute byte offset: t * D * 4 ───────────────────────────
+    mov     rax, r12
+    imul    rax, r13
+    shl     rax, 2
+
+    ; ── Precompute row pointers ───────────────────────────────────
+    mov     rdi, [r15 + 56]             ; p->h
+    add     rdi, rax
+    mov     [rsp + LOC_HROW], rdi
+
+    mov     rdi, [r15 + 0]              ; p->x
+    add     rdi, rax
+    mov     [rsp + LOC_XROW], rdi
+
+    mov     rdi, [r15 + 64]             ; p->dy
+    add     rdi, rax
+    mov     [rsp + LOC_DYROW], rdi
+
+    mov     rdi, [r15 + 72]             ; p->dx
+    add     rdi, rax
+    mov     [rsp + LOC_DXROW], rdi
+
+    ; A_diag row
+    mov     rdi, [r15 + 16]
+    test    rdi, rdi
+    jz      .adiag_null
+    add     rdi, rax
+.adiag_null:
+    mov     [rsp + LOC_ADIAG], rdi
+
+    ; h_prev row
+    test    r12, r12
+    jnz     .has_prev
+    mov     rdi, [r15 + 48]             ; h0 (may be NULL)
+    jmp     .hprev_done
+.has_prev:
+    mov     rdi, [r15 + 56]
+    lea     rbx, [r12 - 1]
+    imul    rbx, r13
+    shl     rbx, 2
+    add     rdi, rbx
+.hprev_done:
+    mov     [rsp + LOC_HPREV], rdi
+
+    ; Load delta[t]
+    mov     rax, [r15 + 40]
+    movss   xmm0, [rax + r12*4]        ; xmm0 = delta[t]
+
+    ; ddt accumulator
+    xorps   xmm1, xmm1                 ; xmm1 = ddt
+
+    ; ── Inner loop: d = 0 to D-1 ─────────────────────────────────
+    xor     ebx, ebx                    ; d = 0
+
+.dim_loop:
+    cmp     rbx, r13
+    jge     .store_ddt
+
+    ; Load scalars
+    mov     rax, [rsp + LOC_DYROW]
+    movss   xmm2, [rax + rbx*4]        ; dy
+
+    mov     rax, [rsp + LOC_HROW]
+    movss   xmm3, [rax + rbx*4]        ; h[t*D+d]
+
+    mov     rax, [rsp + LOC_XROW]
+    movss   xmm4, [rax + rbx*4]        ; x[t*D+d]
+
+    mov     rax, [r15 + 8]
+    movss   xmm5, [rax + rbx*4]        ; A[d]
+
+    mov     rax, [r15 + 24]
+    movss   xmm6, [rax + rbx*4]        ; B[d]
+
+    mov     rax, [r15 + 32]
+    movss   xmm7, [rax + rbx*4]        ; C[d]
+
+    movss   xmm8, [r14 + rbx*4]        ; adj_h[d]
+
+    ; h_prev[d]
+    mov     rax, [rsp + LOC_HPREV]
+    test    rax, rax
+    jz      .zero_hp
+    movss   xmm9, [rax + rbx*4]
+    jmp     .hp_ok
+.zero_hp:
+    xorps   xmm9, xmm9
+.hp_ok:
+
+    ; dA_val = A_diag[t*D+d] or Taylor exp
+    mov     rax, [rsp + LOC_ADIAG]
+    test    rax, rax
+    jz      .taylor_scl
+    movss   xmm10, [rax + rbx*4]
+    jmp     .da_ok
+.taylor_scl:
+    ; exp(x) ≈ 1 + x + x²/2 + x³/6 where x = delta*A
+    vmulss  xmm10, xmm0, xmm5          ; x = delta * A
+    vmovss  xmm11, xmm10               ; save x
+    vmulss  xmm12, xmm10, xmm10        ; x²
+    movss   xmm13, [rel bwd_s_half]
+    vmulss  xmm13, xmm12, xmm13        ; x²/2
+    vaddss  xmm10, xmm10, xmm13        ; x + x²/2
+    vmulss  xmm13, xmm12, xmm11        ; x³
+    movss   xmm14, [rel bwd_s_sixth]
+    vmulss  xmm13, xmm13, xmm14        ; x³/6
+    vaddss  xmm10, xmm10, xmm13        ; x + x²/2 + x³/6
+    movss   xmm13, [rel bwd_s_one]
+    vaddss  xmm10, xmm10, xmm13        ; 1 + ...
+.da_ok:
+
+    ; ah = adj_h[d] + dy * C[d]
+    vmulss  xmm11, xmm2, xmm7          ; dy * C
+    vaddss  xmm11, xmm11, xmm8         ; ah
+
+    ; dC[d] += dy * h
+    mov     rax, [r15 + 96]
+    movss   xmm12, [rax + rbx*4]
+    vfmadd231ss xmm12, xmm2, xmm3
+    movss   [rax + rbx*4], xmm12
+
+    ; dB[d] += ah * delta * x
+    mov     rax, [r15 + 88]
+    movss   xmm12, [rax + rbx*4]
+    vmulss  xmm13, xmm11, xmm0         ; ah * delta
+    vfmadd231ss xmm12, xmm13, xmm4
+    movss   [rax + rbx*4], xmm12
+
+    ; dA[d] += ah * delta * dA_val * h_prev
+    mov     rax, [r15 + 80]
+    movss   xmm12, [rax + rbx*4]
+    vmulss  xmm13, xmm11, xmm0         ; ah * delta
+    vmulss  xmm13, xmm13, xmm10        ; * dA_val
+    vfmadd231ss xmm12, xmm13, xmm9
+    movss   [rax + rbx*4], xmm12
+
+    ; dx[t*D+d] = ah * delta * B
+    mov     rax, [rsp + LOC_DXROW]
+    vmulss  xmm12, xmm11, xmm0
+    vmulss  xmm12, xmm12, xmm6
+    movss   [rax + rbx*4], xmm12
+
+    ; ddt += ah * (A * dA_val * h_prev + B * x)
+    vmulss  xmm12, xmm5, xmm10         ; A * dA_val
+    vmulss  xmm12, xmm12, xmm9         ; * h_prev
+    vfmadd231ss xmm12, xmm6, xmm4      ; + B * x
+    vmulss  xmm13, xmm11, xmm12        ; ah * (...)
+    vaddss  xmm1, xmm1, xmm13
+
+    ; adj_h[d] = ah * dA_val
+    vmulss  xmm12, xmm11, xmm10
+    movss   [r14 + rbx*4], xmm12
+
+    inc     ebx
+    jmp     .dim_loop
+
+    ; ── Store ddelta[t] ───────────────────────────────────────────
+.store_ddt:
+    mov     rax, [r15 + 104]
+    addss   xmm1, [rax + r12*4]
+    movss   [rax + r12*4], xmm1
+
+    dec     r12
     jmp     .time_loop
-    
-.cleanup:
-    ; Epilogue
+
+    ; ── Cleanup ───────────────────────────────────────────────────
+.free_adj_h:
+    mov     rdi, r14
+    call    free
+
+.epilogue:
+    add     rsp, LOCALS
     pop     r15
     pop     r14
     pop     r13
@@ -218,5 +291,10 @@ scan1d_backward_m1_shared_bc_simple_asm:
     pop     rbx
     pop     rbp
     ret
+
+section .rodata
+bwd_s_half:   dd 0.5
+bwd_s_sixth:  dd 0.16666667            ; 1/6
+bwd_s_one:    dd 1.0
 
 section .note.GNU-stack noalloc noexec nowrite progbits

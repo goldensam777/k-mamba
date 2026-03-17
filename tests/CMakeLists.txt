@@ -57,8 +57,15 @@ target_compile_options(test_optimatrix_kernels PRIVATE
     -O3 -mavx2 -Wall -Wextra -g
 )
 
+# Test backward ASM vs C
+add_executable(test_scan1d_backward_asm unit/test_scan1d_backward_asm.c)
+target_link_libraries(test_scan1d_backward_asm PRIVATE k-mamba k-mamba-cpu optimatrix::optimatrix m)
+target_link_options(test_scan1d_backward_asm PRIVATE -no-pie)
+target_compile_options(test_scan1d_backward_asm PRIVATE -O3 -mavx2 -Wall -Wextra -g)
+
 # Ajouter aux tests CTest
 add_test(NAME optimatrix_kernels_unit COMMAND test_optimatrix_kernels)
+add_test(NAME Scan1DBackwardASM COMMAND test_scan1d_backward_asm)
 
 # Activer les tests
 enable_testing()
@@ -66,4 +73,28 @@ add_test(NAME OptimizersTest COMMAND test_optimizers)
 
 if(KMAMBA_BUILD_CUDA)
     add_test(NAME CudaOptimizersTest COMMAND test_cuda_optimizers)
+
+    # Test scan1d CUDA vs reference CPU
+    add_executable(test_cuda_scan test_cuda_scan.cu)
+
+    target_include_directories(test_cuda_scan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../optimatrix/include
+    )
+
+    target_link_libraries(test_cuda_scan PRIVATE
+        k-mamba-cuda
+        cuda cudart
+    )
+
+    set_target_properties(test_cuda_scan PROPERTIES
+        CUDA_ARCHITECTURES "70"
+    )
+
+    target_compile_options(test_cuda_scan PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+        $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+    )
+
+    add_test(NAME CudaScan1DTest COMMAND test_cuda_scan)
 endif()

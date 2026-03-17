@@ -9,8 +9,8 @@ set(CMAKE_ASM_NASM_FLAGS "-f elf64")
 set(CPU_ASM_SRCS
     scan1d.asm
     scan2d.asm
-    # scan1d_backward_m1_shared_bc.asm       # TODO: fix "two index registers" ASM bug
-    # scan1d_backward_m1_shared_bc_simple.asm # TODO: fix "two index registers" ASM bug
+    scan1d_backward_m1_shared_bc.asm
+    scan1d_backward_m1_shared_bc_simple.asm
 )
 
 set(CPU_C_SRCS
