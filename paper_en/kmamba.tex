@@ -1,4 +1,4 @@
-\documentclass[10pt,twocolumn]{article}
+\documentclass[10pt,onecolumn]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{graphicx}
@@ -14,6 +14,8 @@
 \usepackage{microtype}
 \usepackage{cite}
 \usepackage{url}
+\usepackage{pifont}   % Required for \ding
+\usepackage{lmodern}  % Required for scalable fonts (fixes microtype error)
 
 % arXiv style
 \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
@@ -190,7 +192,7 @@ Both miss cross-axis interactions within a single pass.
 
 \subsection{Comparison with Prior Work}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Multi-dimensional Mamba approaches.}
 \label{tab:comparison}
@@ -248,7 +250,7 @@ and $(i,j{-}1)$. This defines a DAG where the \emph{topological depth}
 Table~\ref{tab:wavefront} shows measured speedups from our benchmark
 (bench\_paper.c, G3), confirming Theorem~\ref{thm:wavefront} to within 0.1\%.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Wavefront speedup on $d \times d$ grids ($D{=}32$, $M{=}8$).}
 \label{tab:wavefront}
@@ -310,7 +312,7 @@ Shared memory stores $2L$ floats $(a_t, b_t)_{t=0}^{L-1}$.
 
 \subsection{Complexity Analysis}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Scan complexity. $P = d_1 \times d_2$ positions; $D$, $M$ fixed.}
 \label{tab:complexity}
@@ -367,7 +369,7 @@ using 256-bit FMA (\texttt{vfmadd231ps}).
 On a $512 \times 512$ matrix, this achieves 2.28 GFLOPS versus
 0.24 GFLOPS for the scalar reference — a $9.5\times$ speedup.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{GEMM performance (square $n \times n$, 200 iterations).}
 \label{tab:gemm}
@@ -422,7 +424,7 @@ CPU peak compute $\approx 32$ GFLOPS (AVX2 FMA) and
 DDR4-3200 bandwidth $\approx 50$ GB/s,
 the ridge point is $0.64$ FLOP/Byte.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Roofline classification of K-Mamba kernels.}
 \label{tab:roofline}
@@ -500,7 +502,7 @@ At $L = 1024$: Blelloch requires 20 synchronization barriers versus
 1024 sequential steps — a $51\times$ depth reduction
 (Table~\ref{tab:blelloch}, measured analytically).
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Blelloch depth vs sequential depth.}
 \label{tab:blelloch}
@@ -573,11 +575,8 @@ does not require large software stacks —
 a few thousand lines of C, assembly, and CUDA suffice.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\bibliographystyle{plain}
-\bibliography{kmamba}
-
+% Appendices come before references
 \appendix
-
 \section{Monoid Associativity Proof}
 \label{app:monoid}
 
@@ -610,5 +609,10 @@ For a $d_1 \times d_2$ grid with $d_1 \leq d_2$:
   \item Speedup: $S = d_1 d_2 / (d_1 + d_2 - 1)$.
 \end{itemize}
 For $d_1 = d_2 = d$: $S = d^2/(2d-1) \approx d/2$, matching Theorem~\ref{thm:wavefront}.
+
+% ─────────────────────────────────────────────────────────────────────────────
+% References (now after appendices)
+\bibliographystyle{plain}
+\bibliography{kmamba}
 
 \end{document}
