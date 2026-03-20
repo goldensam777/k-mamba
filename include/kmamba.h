@@ -50,6 +50,9 @@ typedef struct {
     /* BCNorm biases (Mamba-3) */
     float *b_B;           /* [state_size] — bias after RMSNorm(W_B·x) */
     float *b_C;           /* [state_size] — bias after RMSNorm(W_C·x) */
+
+    /* Complex SSM / RoPE angles (Mamba-3 §3.2) */
+    float *theta;         /* [state_size/2] — learned rotation angles per pair */
     
     /* ConvND parameters */
     float *convnd_kernel;  /* [convnd_ndims * convnd_K * dim] */
@@ -93,6 +96,7 @@ typedef struct {
     float *g_b_B;
     float *g_b_C;
     float *g_delta_proj;
+    float *g_theta;       /* [state_size/2] */
 
     /* Moments (used by ADAM-based optimizers) */
     float *m_W_in;
@@ -111,6 +115,8 @@ typedef struct {
     float *v_b_C;
     float *m_delta_proj;
     float *v_delta_proj;
+    float *m_theta;       /* [state_size/2] */
+    float *v_theta;       /* [state_size/2] — only for Adam-based */
 } MBOptimState;
 
 /* ============================================================================

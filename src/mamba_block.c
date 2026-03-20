@@ -45,6 +45,7 @@ typedef struct {
     float *A_diag;    /* seq_len x state_size */
     float *B_bar;     /* seq_len x state_size */
     float *u_seq;     /* seq_len x state_size (controller vectors per timestep) */
+    float *h_rot;     /* seq_len x state_size  R(θ)·h_{t-1} at each step (for dA grad) */
 } ForwardStore;
 
 /* ============================================================================
@@ -292,6 +293,15 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
         return NULL;
     }
 
+    /* Complex SSM rotation angles theta [state_size/2] */
+    size_t theta_size = config->state_size / 2;
+    if (theta_size == 0) theta_size = 1;  /* guard for tiny state_size */
+    block->theta = (float *)calloc(theta_size, sizeof(float));
+    if (!block->theta) {
+        mamba_block_free(block);
+        return NULL;
+    }
+
     block->hidden = (float *)calloc(config->state_size, sizeof(float));
     block->delta  = (float *)calloc(config->seq_len, sizeof(float));
 
@@ -342,6 +352,7 @@ void mamba_block_free(MambaBlock *block) {
     if (block->W_C.data) free(block->W_C.data);
     if (block->b_B) free(block->b_B);
     if (block->b_C) free(block->b_C);
+    if (block->theta) free(block->theta);
     if (block->delta_proj.data) free(block->delta_proj.data);
     if (block->hidden) free(block->hidden);
     if (block->delta) free(block->delta);
@@ -408,6 +419,16 @@ void mamba_block_init(MambaBlock *block) {
     memset(block->b_B, 0, block->config.state_size * sizeof(float));
     memset(block->b_C, 0, block->config.state_size * sizeof(float));
 
+    /* Complex SSM rotation angles — small init ~2π/state_size */
+    {
+        size_t theta_size = block->config.state_size / 2;
+        if (theta_size == 0) theta_size = 1;
+        float base_angle = 2.0f * 3.14159265358979323846f / (float)block->config.state_size;
+        for (size_t i = 0; i < theta_size; i++) {
+            block->theta[i] = ((float)rand() / RAND_MAX) * base_angle;
+        }
+    }
+
     /* Small uniform init for delta_proj (1 x dim) */
     for (size_t i = 0; i < block->delta_proj.rows * block->delta_proj.cols; i++) {
         block->delta_proj.data[i] = ((float)rand() / RAND_MAX - 0.5f) * 0.02f;
@@ -457,6 +478,8 @@ void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptim
     s->g_b_B = (float *)calloc(state,   sizeof(float));
     s->g_b_C = (float *)calloc(state,   sizeof(float));
     s->g_delta_proj = (float *)calloc(dim, sizeof(float));
+    size_t theta_size = state / 2; if (theta_size == 0) theta_size = 1;
+    s->g_theta      = (float *)calloc(theta_size, sizeof(float));
 
     /* Allocate first moments for all momentum-based optimizers */
     if (type == OPTIMIZER_ADAM_CLIP || type == OPTIMIZER_ADAMW ||
@@ -469,6 +492,7 @@ void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptim
         s->m_b_B        = (float *)calloc(state,    sizeof(float));
         s->m_b_C        = (float *)calloc(state,    sizeof(float));
         s->m_delta_proj = (float *)calloc(dim,      sizeof(float));
+        s->m_theta      = (float *)calloc(theta_size, sizeof(float));
     }
     /* Allocate second moments only for Adam-based optimizers */
     if (type == OPTIMIZER_ADAM_CLIP || type == OPTIMIZER_ADAMW) {
@@ -480,6 +504,7 @@ void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptim
         s->v_b_B        = (float *)calloc(state,    sizeof(float));
         s->v_b_C        = (float *)calloc(state,    sizeof(float));
         s->v_delta_proj = (float *)calloc(dim,      sizeof(float));
+        s->v_theta      = (float *)calloc(theta_size, sizeof(float));
     }
 
     s->step = 0;
@@ -500,6 +525,7 @@ static void _mamba_free_opt_for(MambaBlock *block) {
             free(s->g_W_in); free(s->g_W_out); free(s->g_A_log);
             free(s->g_W_B); free(s->g_W_C); free(s->g_b_B); free(s->g_b_C);
             free(s->g_delta_proj);
+            if (s->g_theta) free(s->g_theta);
 
             /* Free moments only if allocated */
             if (s->m_W_in) { free(s->m_W_in); free(s->v_W_in); }
@@ -510,6 +536,7 @@ static void _mamba_free_opt_for(MambaBlock *block) {
             if (s->m_b_B) { free(s->m_b_B); if (s->v_b_B) free(s->v_b_B); }
             if (s->m_b_C) { free(s->m_b_C); if (s->v_b_C) free(s->v_b_C); }
             if (s->m_delta_proj) { free(s->m_delta_proj); free(s->v_delta_proj); }
+            if (s->m_theta) { free(s->m_theta); if (s->v_theta) free(s->v_theta); }
             
             free(s);
             for (size_t j = i; j + 1 < g_opt_n; j++) { g_opt_blocks[j] = g_opt_blocks[j+1]; g_opt_states[j] = g_opt_states[j+1]; }
@@ -530,6 +557,7 @@ void mamba_zero_grads(MambaBlock *block) {
             memset(s->g_W_B, 0, size_in * sizeof(float)); memset(s->g_W_C, 0, size_in * sizeof(float));
             memset(s->g_b_B, 0, state * sizeof(float));   memset(s->g_b_C, 0, state * sizeof(float));
             memset(s->g_delta_proj, 0, dim * sizeof(float));
+            { size_t ts = state / 2; if (ts == 0) ts = 1; memset(s->g_theta, 0, ts * sizeof(float)); }
             return;
         }
     }
@@ -577,6 +605,8 @@ static void adam_clip_update(MambaBlock *block, MBOptimState *s, const MBOptimCo
     ADAM_CLIP_UPDATE(block->b_B, s->g_b_B, s->m_b_B, s->v_b_B, state);
     ADAM_CLIP_UPDATE(block->b_C, s->g_b_C, s->m_b_C, s->v_b_C, state);
     ADAM_CLIP_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, s->v_delta_proj, dim);
+    { size_t ts = state/2; if (ts==0) ts=1;
+      ADAM_CLIP_UPDATE(block->theta, s->g_theta, s->m_theta, s->v_theta, ts); }
 
 #undef ADAM_CLIP_UPDATE
 #endif
@@ -605,6 +635,8 @@ static void adamw_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig
     ADAMW_UPDATE(block->b_B, s->g_b_B, s->m_b_B, s->v_b_B, state);
     ADAMW_UPDATE(block->b_C, s->g_b_C, s->m_b_C, s->v_b_C, state);
     ADAMW_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, s->v_delta_proj, dim);
+    { size_t ts = state/2; if (ts==0) ts=1;
+      ADAMW_UPDATE(block->theta, s->g_theta, s->m_theta, s->v_theta, ts); }
 
 #undef ADAMW_UPDATE
 }
@@ -628,6 +660,8 @@ static void sgd_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig *
     SGD_UPDATE(block->b_B, s->g_b_B, s->m_b_B, state);
     SGD_UPDATE(block->b_C, s->g_b_C, s->m_b_C, state);
     SGD_UPDATE(block->delta_proj.data, s->g_delta_proj, s->m_delta_proj, dim);
+    { size_t ts = state/2; if (ts==0) ts=1;
+      SGD_UPDATE(block->theta, s->g_theta, s->m_theta, ts); }
 
 #undef SGD_UPDATE
 }
@@ -675,6 +709,8 @@ static void muon_update(MambaBlock *block, MBOptimState *s, const MBOptimConfig 
     MUON_UPDATE_VEC(block->b_B,        s->g_b_B,   s->m_b_B,   state);
     MUON_UPDATE_VEC(block->b_C,        s->g_b_C,   s->m_b_C,   state);
     MUON_UPDATE_VEC(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  dim);
+    { size_t ts = state/2; if (ts==0) ts=1;
+      MUON_UPDATE_VEC(block->theta, s->g_theta, s->m_theta, ts); }
 
 #undef MUON_UPDATE_MAT
 #undef MUON_UPDATE_VEC
@@ -714,35 +750,31 @@ void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
 static void selective_scan_forward_store(ForwardStore *store, float *state,
                     const float *input, const float *delta,
                     const MBMatrix *A_bar, const float *B_seq,
-                    const MBMatrix *C, float D,
+                    const MBMatrix *C, float D_unused,
+                    const float *theta,
                     size_t seq_len, size_t state_size) {
     if (!store || !state) return;
-    (void)C; (void)D;
+    (void)C; (void)D_unused;
 
     store->x = (float *)calloc(seq_len * state_size, sizeof(float));
     store->A_diag = (float *)calloc(seq_len * state_size, sizeof(float));
     store->B_bar = (float *)calloc(seq_len * state_size, sizeof(float));
     store->u_seq = (float *)calloc(seq_len * state_size, sizeof(float));
+    store->h_rot = (float *)calloc(seq_len * state_size, sizeof(float));
 
     memset(state, 0, state_size * sizeof(float));
 
     float *zero_prev = (float *)calloc(state_size, sizeof(float));
+    float *h_rot_tmp = (float *)malloc(state_size * sizeof(float));
 
     for (size_t t = 0; t < seq_len; t++) {
         const float *u_t = &input[t * state_size];
         float dt_t = delta[t];
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
         for (size_t i = 0; i < state_size; i++) store->u_seq[t * state_size + i] = u_t[i];
 
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+        /* Compute A_diag and B_bar */
         for (size_t i = 0; i < state_size; i++) {
-            /* Clamp A ≤ -1e-5 : garantit exp(dt*A) < 1 (scan stable)
-             * même si AdamW pousse A_log vers des valeurs positives. */
             float a_val = A_bar->data[i * state_size + i];
             if (a_val > -1e-5f) a_val = -1e-5f;
             float a_diag_t = expf(dt_t * a_val);
@@ -750,20 +782,34 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
             store->B_bar[t * state_size + i] = dt_t * B_seq[t * state_size + i];
         }
 
-        float *x_prev = (t == 0) ? zero_prev : &store->x[(t-1)*state_size];
+        /* Apply R(θ) to h_prev → h_rot_tmp */
+        float *h_prev = (t == 0) ? zero_prev : &store->x[(t-1)*state_size];
+        if (theta) {
+            for (size_t i = 0; i + 1 < state_size; i += 2) {
+                float th = theta[i >> 1];
+                float c = cosf(th), s = sinf(th);
+                float h0 = h_prev[i], h1 = h_prev[i+1];
+                h_rot_tmp[i]   = c*h0 - s*h1;
+                h_rot_tmp[i+1] = s*h0 + c*h1;
+            }
+            if (state_size & 1) h_rot_tmp[state_size-1] = h_prev[state_size-1];
+        } else {
+            memcpy(h_rot_tmp, h_prev, state_size * sizeof(float));
+        }
+        /* Store h_rot for dA gradient in backward */
+        memcpy(&store->h_rot[t * state_size], h_rot_tmp, state_size * sizeof(float));
+
         float *x_t = &store->x[t * state_size];
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
         for (size_t i = 0; i < state_size; i++) {
             float a_diag_t = store->A_diag[t * state_size + i];
             float bbar = store->B_bar[t * state_size + i];
-            x_t[i] = a_diag_t * x_prev[i] + bbar * u_t[i];
+            x_t[i] = a_diag_t * h_rot_tmp[i] + bbar * u_t[i];
             state[i] = x_t[i];
         }
     }
 
     free(zero_prev);
+    free(h_rot_tmp);
 }
 
 /* ============================================================================
@@ -773,6 +819,7 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
 static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
                                     const float *dY, const float *input_flat,
                                     float *d_input_out,
+                                    const float *theta,
                                     size_t seq_len, size_t state_size) {
     if (!store || !block) return;
     size_t dim = block->config.dim;
@@ -834,6 +881,10 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
         float dt_t = block->delta[t];
         mb_matrix_vec_mult(C_t, &block->W_C, &input_flat[t * dim]);
 
+        /* d_h_rot[d] will hold ah * a_diag  (intermediate for theta grad + adj_h) */
+        float *d_h_rot = (float *)malloc(state_size * sizeof(float));
+        if (!d_h_rot) continue;
+
         for (size_t d = 0; d < state_size; d++) {
             size_t td = (size_t)t * state_size + d;
             float c_t_d   = C_t[d];
@@ -841,7 +892,7 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
             float b_bar_t = store->B_bar[td];   /* = delta_t * B_t[d]    */
             float u_t_d   = store->u_seq[td];   /* controller from W_in  */
             float a_diag  = store->A_diag[td];  /* exp(delta_t * A_log)  */
-            float h_prev  = (t > 0) ? store->x[((size_t)t - 1) * state_size + d] : 0.0f;
+            float h_rot_d = store->h_rot[td];   /* R(θ)·h_{t-1}[d]      */
             float a_log_d = block->A_log.data[d];
             if (a_log_d > -1e-5f) a_log_d = -1e-5f;
 
@@ -854,19 +905,47 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
             /* Gradient for B_t: dB_t[d] = ah * delta_t * u_t[d] */
             dB_seq[td] = ah * dt_t * u_t_d;
 
-            /* Gradient for A_log[d] (accumulated over time) */
-            scan_dA[d] += ah * dt_t * a_diag * h_prev;
+            /* Gradient for A_log[d]: use h_rot (not h_prev directly) */
+            scan_dA[d] += ah * dt_t * a_diag * h_rot_d;
 
             /* Gradient for u_t (through B_bar_t * u_t) */
             scan_du[td] = ah * b_bar_t;
 
             /* Gradient for delta_t (through both A_bar and B_bar) */
-            scan_ddelta[(size_t)t] += ah * (a_log_d * a_diag * h_prev +
+            scan_ddelta[(size_t)t] += ah * (a_log_d * a_diag * h_rot_d +
                                             (b_bar_t / (dt_t > 1e-8f ? dt_t : 1e-8f)) * u_t_d);
 
-            /* Propagate adjoint backward through time */
-            adj_h[d] = ah * a_diag;
+            /* d_h_rot[d] = ah * a_diag  (gradient through rotation) */
+            d_h_rot[d] = ah * a_diag;
         }
+
+        /* Gradient for theta and adj_h through R(θ) */
+        {
+            MBOptimState *s_opt = _find_opt(block);
+            float *h_prev_vec = (t > 0) ? &store->x[((size_t)t - 1) * state_size] : NULL;
+
+            for (size_t i = 0; i + 1 < state_size; i += 2) {
+                float th = theta ? theta[i >> 1] : 0.0f;
+                float c = cosf(th), s_val = sinf(th);
+                float hp0 = h_prev_vec ? h_prev_vec[i]   : 0.0f;
+                float hp1 = h_prev_vec ? h_prev_vec[i+1] : 0.0f;
+                float dr0 = d_h_rot[i], dr1 = d_h_rot[i+1];
+
+                /* dtheta_i = d_h_rot[2i] * d(R*h)_{2i}/dtheta_i
+                 *           + d_h_rot[2i+1] * d(R*h)_{2i+1}/dtheta_i
+                 * d/dtheta [ c*h0 - s*h1 ] = -s*h0 - c*h1
+                 * d/dtheta [ s*h0 + c*h1 ] =  c*h0 - s*h1 */
+                if (theta && s_opt && s_opt->g_theta)
+                    s_opt->g_theta[i >> 1] += dr0 * (-s_val * hp0 - c * hp1)
+                                            + dr1 * (c * hp0 - s_val * hp1);
+
+                /* adj_h = R^T * d_h_rot  (R^T = rotation by -theta) */
+                adj_h[i]   = c * dr0 + s_val * dr1;
+                adj_h[i+1] = -s_val * dr0 + c * dr1;
+            }
+            if (state_size & 1) adj_h[state_size-1] = d_h_rot[state_size-1];
+        }
+        free(d_h_rot);
     }
 
     /* Accumulate A gradient */
@@ -1036,11 +1115,14 @@ void mamba_backward(MambaBlock *block, const float *dY, const float *input,
 
     selective_scan_forward_store(&store, block->hidden, u_seq, block->delta,
                                 A_bar, B_seq, &block->W_C, 0.0f,
+                                block->theta,
                                 seq_len, state_size);
 
-    selective_scan_backward(&store, block, dY, input, d_input, seq_len, state_size);
+    selective_scan_backward(&store, block, dY, input, d_input,
+                            block->theta, seq_len, state_size);
 
     free(store.x); free(store.A_diag); free(store.B_bar); free(store.u_seq);
+    if (store.h_rot) free(store.h_rot);
     free(u_seq); free(B_seq);
     mb_matrix_free(A_bar);
 }
@@ -1117,14 +1199,39 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
         }
         memset(block->scan_h, 0, (size_t)D * sizeof(float));
 
-        MambaScan1DParams sp = {
-            .x = u_seq, .A = block->A_log.data,
-            .B = block->scan_B, .C = block->scan_C,
-            .delta = block->scan_delta, .h = block->scan_h,
-            .y = scan_out,
-            .L = L, .D = D, .M = 1
-        };
-        mamba_scan1d_forward(&sp);
+        /* Complex SSM scan with R(θ) rotation (Mamba-3 §3.2) */
+        {
+            float *h_cur = block->scan_h;
+            float *h_rot = (float *)malloc((size_t)D * sizeof(float));
+            if (!h_rot) { free(u_seq); free(scan_out); continue; }
+
+            for (long t = 0; t < L; t++) {
+                float dt_t = block->delta[t];
+
+                /* Apply R(θ) to h_cur → h_rot */
+                for (long i = 0; i + 1 < D; i += 2) {
+                    float th = block->theta[i >> 1];
+                    float c = cosf(th), s = sinf(th);
+                    float h0 = h_cur[i], h1 = h_cur[i+1];
+                    h_rot[i]   = c*h0 - s*h1;
+                    h_rot[i+1] = s*h0 + c*h1;
+                }
+                if (D & 1) h_rot[D-1] = h_cur[D-1];
+
+                /* h_t = exp(dt*A)*h_rot + dt*B_t*u_t */
+                for (long d = 0; d < D; d++) {
+                    float a = block->A_log.data[d];
+                    if (a > -1e-5f) a = -1e-5f;
+                    h_cur[d] = expf(dt_t * a) * h_rot[d]
+                               + dt_t * block->scan_B[t*D+d] * u_seq[t*D+d];
+                }
+
+                /* scan_out[t] = C_t * h_t */
+                for (long d = 0; d < D; d++)
+                    scan_out[t*D+d] = block->scan_C[t*D+d] * h_cur[d];
+            }
+            free(h_rot);
+        }
         memcpy(block->hidden, block->scan_h, (size_t)D * sizeof(float));
 
         float *ybuf = (float *)malloc(dim * sizeof(float));

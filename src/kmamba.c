@@ -188,7 +188,7 @@ int kmamba_save(const KMamba *m, const char *path) {
 
     CheckpointHeader h = {0};
     memcpy(h.magic, "KMAMBA", 6);
-    h.version    = 1;
+    h.version    = 2; /* v2: adds theta (complex SSM angles) */
     h.vocab_size = (uint64_t)m->cfg.vocab_size;
     h.dim        = (uint64_t)m->cfg.dim;
     h.state_size = (uint64_t)m->cfg.state_size;
@@ -204,6 +204,7 @@ int kmamba_save(const KMamba *m, const char *path) {
 
     for (size_t i = 0; i < m->cfg.n_layers; i++) {
         const MambaBlock *b = m->layers[i];
+        size_t theta_size = b->W_in.rows / 2; if (theta_size == 0) theta_size = 1;
         if (write_floats(f, b->W_in.data,      b->W_in.rows * b->W_in.cols)           ||
             write_floats(f, b->W_out.data,     b->W_out.rows * b->W_out.cols)          ||
             write_floats(f, b->A_log.data,     b->A_log.rows * b->A_log.cols)          ||
@@ -211,7 +212,8 @@ int kmamba_save(const KMamba *m, const char *path) {
             write_floats(f, b->W_C.data,       b->W_C.rows * b->W_C.cols)              ||
             write_floats(f, b->b_B,            b->W_B.rows)                             ||
             write_floats(f, b->b_C,            b->W_C.rows)                             ||
-            write_floats(f, b->delta_proj.data, b->delta_proj.rows * b->delta_proj.cols)) {
+            write_floats(f, b->delta_proj.data, b->delta_proj.rows * b->delta_proj.cols)||
+            write_floats(f, b->theta,          theta_size)) {
             fclose(f); return -1;
         }
     }
@@ -229,7 +231,7 @@ KMamba* kmamba_load(const char *path, int for_training,
 
     CheckpointHeader h;
     if (fread(&h, sizeof(h), 1, f) != 1) { fclose(f); return NULL; }
-    if (memcmp(h.magic, "KMAMBA", 6) != 0 || h.version != 1) { fclose(f); return NULL; }
+    if (memcmp(h.magic, "KMAMBA", 6) != 0 || (h.version != 1 && h.version != 2)) { fclose(f); return NULL; }
 
     KMambaConfig cfg = {
         .vocab_size  = (size_t)h.vocab_size,
@@ -258,6 +260,7 @@ KMamba* kmamba_load(const char *path, int for_training,
 
     for (size_t i = 0; i < cfg.n_layers; i++) {
         MambaBlock *b = m->layers[i];
+        size_t theta_size = b->W_in.rows / 2; if (theta_size == 0) theta_size = 1;
         if (read_floats(f, b->W_in.data,      b->W_in.rows * b->W_in.cols)           ||
             read_floats(f, b->W_out.data,     b->W_out.rows * b->W_out.cols)          ||
             read_floats(f, b->A_log.data,     b->A_log.rows * b->A_log.cols)          ||
@@ -265,7 +268,8 @@ KMamba* kmamba_load(const char *path, int for_training,
             read_floats(f, b->W_C.data,       b->W_C.rows * b->W_C.cols)              ||
             read_floats(f, b->b_B,            b->W_B.rows)                             ||
             read_floats(f, b->b_C,            b->W_C.rows)                             ||
-            read_floats(f, b->delta_proj.data, b->delta_proj.rows * b->delta_proj.cols)) {
+            read_floats(f, b->delta_proj.data, b->delta_proj.rows * b->delta_proj.cols)||
+            read_floats(f, b->theta,          theta_size)) {
             kmamba_free(m); fclose(f); return NULL;
         }
     }
