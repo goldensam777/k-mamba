@@ -301,6 +301,15 @@ int kmamba_forward(KMamba *m, const uint8_t *tokens, float *logits_out) {
 
     size_t L = m->cfg.seq_len;
     size_t D = m->cfg.dim;
+    size_t N = m->cfg.state_size;
+
+    /* Reset hidden state to zero: each window is processed independently.
+     * Without this, block->hidden accumulates state across evaluation windows
+     * (non-contiguous in the dataset), causing hidden state blow-up. */
+    for (size_t i = 0; i < m->cfg.n_layers; i++) {
+        memset(m->layers[i]->hidden, 0, N * sizeof(float));
+        memset(m->layers[i]->scan_h, 0, N * sizeof(float));
+    }
 
     float *buf0 = (float *)xcalloc(L * D, sizeof(float));
     float *buf1 = (float *)xcalloc(L * D, sizeof(float));
