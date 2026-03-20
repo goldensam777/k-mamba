@@ -31,6 +31,10 @@ void mamba_scan1d_cuda_backward(
     );
 }
 
+int mamba_scannd_cuda_forward(ScanNDParams *p) {
+    return om_scannd_forward(p);
+}
+
 void mamba_block_cuda_forward(
     const float *x, const float *A_diag, const float *B_bar, const float *C,
     const float *dt, float *h, float *y,

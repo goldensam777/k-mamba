@@ -15,6 +15,101 @@ Un **bibliothèque C** pour State Space Models Mamba en dimensions N, basée sur
 
 ---
 
+## Chantier courant — Générateur Wavefront ND natif
+
+### Rappel important
+
+Le projet ne vise pas seulement "Mamba" au sens générique, mais **Mamba-3** :
+
+- **BCNorm** pour `B` et `C`
+- **Complex SSM / rotations `theta`**
+- **discrétisation exp-trapezoidal** via `lambda_proj`
+
+Le **scan2d wavefront natif** est une innovation originale du projet. La prochaine
+étape est de généraliser cette idée en une primitive fondatrice réutilisable.
+
+### Idée centrale
+
+Introduire un **générateur de wavefront ND borné et causal** dans `k-mamba`,
+séparé des opérateurs eux-mêmes.
+
+Cette primitive devra :
+
+- générer les hyper-diagonales de niveau `k = i0 + i1 + ... + i(n-1)`
+- garantir que tous les points d'un même niveau sont indépendants
+- servir de squelette d'exécution pour :
+  - `scanND`
+  - `convKD`
+  - tout futur opérateur causal ND sur grille
+
+### Principe architectural
+
+Le générateur **reste dans `k-mamba`**, pas dans `optimatrix`.
+
+Raison :
+
+- `optimatrix` contient du calcul générique
+- le wavefront ND causal encode une **structure topologique de dépendances**
+- cette structure appartient à la logique du modèle et des opérateurs ND
+
+### Objectif technique
+
+Créer une primitive commune qui devienne la base de :
+
+1. la version **CPU de référence** en C
+2. la version **CPU haute performance** en ASM AVX2 quand la forme le permet
+3. la version **GPU** en CUDA avec parallélisme intra-wavefront
+
+### Plan de travail
+
+#### Phase 1 — Primitive de référence
+
+- Ajouter une API du type `wavefront_nd_*` dans `include/`
+- Implémenter un générateur de compositions bornées :
+  - `sum(idx[d]) = level`
+  - `0 <= idx[d] < dims[d]`
+- Exposer une interface callback / visitor réutilisable
+
+#### Phase 2 — Ordonnanceur ND
+
+- Ajouter un parcours niveau par niveau
+- Permettre un parallélisme **intra-wavefront**
+- Préparer une API commune pour CPU et CUDA
+
+#### Phase 3 — Intégration opérateurs
+
+- Brancher `scanND` sur ce générateur
+- Brancher ensuite `convKD`
+- Garder l'opérateur séparé du parcours topologique
+
+#### Phase 4 — Optimisation backend
+
+- CPU : spécialisations ASM pour cas chauds
+- GPU : génération / exécution CUDA par wavefront
+- Benchmarks et tests de cohérence avec la version de référence
+
+### Invariants à respecter
+
+- Ne pas coder le générateur "pour Mamba seulement"
+- Ne pas le déplacer dans `optimatrix`
+- Le générateur doit être **générique**, l'opérateur doit être **pluggable**
+- La sémantique fondamentale est :
+  - dépendances d'un point du niveau `k` vers des points de niveaux `< k`
+  - indépendance de tous les points du même niveau
+
+### Vision paper
+
+Cette contribution doit pouvoir être formulée comme :
+
+- un **générateur de wavefront ND natif**
+- un **squelette d'exécution causal pour tenseurs ND**
+- une primitive commune pour `scanND` et `convKD`
+
+Autrement dit : l'innovation n'est pas seulement un `scan2d`, mais une
+**primitive topologique universelle pour opérateurs causaux ND**.
+
+---
+
 ## Auteur
 
 **YEVI Mawuli Peniel Samuel** — étudiant en Licence Systèmes Embarqués & IoT à l'IFRI-UAC (Bénin).

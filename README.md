@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="figures/k_mamba_banner.svg" alt="K-Mamba banner" width="100%" />
+</p>
+
 # k-mamba
 
-**Bibliothèque C pour State Space Models Mamba en dimensions N — CPU pur, ASM AVX2.**
+**Bibliothèque C pour Mamba-3 natif en dimensions N, pensée pour l'edge computing sur matériel contraint ou ancien.**
 
 Architecture dualiste : **k-mamba** orchestre les Volontés (logique modèle), **optimatrix** fournit la Puissance (kernels ASM).
 

@@ -18,6 +18,14 @@ if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/optimatrix/CMakeLists.txt)
     message(FATAL_ERROR "optimatrix submodule not found. Run: git submodule update --init --recursive")
 endif()
 
+if(KMAMBA_BUILD_CPU)
+    set(OPTIMATRIX_BUILD_CPU ON CACHE BOOL "" FORCE)
+endif()
+
+if(KMAMBA_BUILD_CUDA)
+    set(OPTIMATRIX_BUILD_CUDA ON CACHE BOOL "" FORCE)
+endif()
+
 add_subdirectory(optimatrix)
 
 # K-Mamba specific backends
@@ -35,6 +43,8 @@ set(KMAMBA_C_SRCS
     src/kmamba.c
     src/mamba_block.c
     src/convnd.c
+    src/scan_nd.c
+    src/wavefront_nd.c
 )
 
 add_library(k-mamba STATIC ${KMAMBA_C_SRCS})

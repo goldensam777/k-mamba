@@ -2,6 +2,7 @@
 #define MAMBA_SCAN_CUDA_H
 
 #include <stddef.h>
+#include "scan_nd.h"
 
 /* ============================================================
  * Mamba-specific CUDA kernels
@@ -27,6 +28,9 @@ void mamba_scan1d_cuda_backward(
     float *d_ddt,
     int L, int D, int M
 );
+
+/* Scan ND forward générique sur GPU */
+int mamba_scannd_cuda_forward(ScanNDParams *p);
 
 /* MambaBlock forward */
 void mamba_block_cuda_forward(

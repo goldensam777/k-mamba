@@ -64,6 +64,16 @@ static void softmax(float *probs, const float *logits, size_t n) {
     for (size_t i = 0; i < n; i++) probs[i] *= inv;
 }
 
+static double sum_squares_f32(const float *x, size_t n) {
+    double acc = 0.0;
+    if (!x) return 0.0;
+    for (size_t i = 0; i < n; i++) {
+        double v = (double)x[i];
+        acc += v * v;
+    }
+    return acc;
+}
+
 /* ========= embedding ========= */
 
 static void embed_lookup(const KMamba *m, float *out, const uint8_t *tokens) {
@@ -378,6 +388,19 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
         for (size_t j = 0; j < D; j++) g[j] += d[j];
     }
 
+    {
+        double grad_sq = sum_squares_f32(g_head, D * V)
+                       + sum_squares_f32(g_embed, V * D);
+        for (size_t i = 0; i < m->cfg.n_layers; i++)
+            grad_sq += (double)mamba_block_grad_sqnorm(m->layers[i]);
+        m->last_grad_norm = sqrtf((float)grad_sq);
+        m->last_grad_over_clip = (m->opt_blocks.clip_norm > 0.0f)
+                               ? (m->last_grad_norm / m->opt_blocks.clip_norm)
+                               : 0.0f;
+        m->last_grad_would_clip = (m->opt_blocks.clip_norm > 0.0f &&
+                                   m->last_grad_norm > m->opt_blocks.clip_norm);
+    }
+
     for (size_t i = 0; i < m->cfg.n_layers; i++)
         mamba_optimizer_step(m->layers[i], &m->opt_blocks);
 
@@ -399,6 +422,7 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
     size_t L = m->cfg.seq_len;
     size_t D = m->cfg.dim;
     size_t Lp1 = L + 1;
+    size_t n_layers = m->cfg.n_layers;
     float invB = 1.0f / (float)batch_size;
     float invL = 1.0f / (float)L;
     float invBL = invB * invL;
@@ -406,16 +430,40 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
     float *g_head  = (float *)xcalloc(D * V, sizeof(float));
     float *g_embed = (float *)xcalloc(V * D, sizeof(float));
     float *head_T  = (float *)xcalloc(V * D, sizeof(float));
+    MambaBlockWorkspace ***thread_ws = NULL;
+    int n_threads = 1;
+
+    if (!g_head || !g_embed || !head_T) {
+        free(g_head); free(g_embed); free(head_T);
+        return NAN;
+    }
+
     transpose(m->head, head_T, D, V);
 
-    for (size_t i = 0; i < m->cfg.n_layers; i++) mamba_zero_grads(m->layers[i]);
+    for (size_t i = 0; i < n_layers; i++) mamba_zero_grads(m->layers[i]);
+
+#ifdef _OPENMP
+    n_threads = omp_get_max_threads();
+#endif
+    thread_ws = (MambaBlockWorkspace ***)xcalloc((size_t)n_threads, sizeof(*thread_ws));
+    for (int t = 0; t < n_threads; t++) {
+        thread_ws[t] = (MambaBlockWorkspace **)xcalloc(n_layers, sizeof(*thread_ws[t]));
+        for (size_t li = 0; li < n_layers; li++) {
+            thread_ws[t][li] = mamba_block_workspace_create(m->layers[li]);
+            if (!thread_ws[t][li]) {
+                fprintf(stderr, "OOM\n");
+                abort();
+            }
+        }
+    }
 
     float total_loss = 0.0f;
 
-    #pragma omp parallel reduction(+:total_loss)
+#pragma omp parallel reduction(+:total_loss)
     {
-        /* Buffers privés par thread */
-        float *acts     = (float *)xcalloc((m->cfg.n_layers + 1) * L * D, sizeof(float));
+        int tid = 0;
+        MambaBlockWorkspace **layer_ws;
+        float *acts     = (float *)xcalloc((n_layers + 1) * L * D, sizeof(float));
         float *logits   = (float *)xcalloc(L * V, sizeof(float));
         float *probs    = (float *)xcalloc(V, sizeof(float));
         float *dlogits  = (float *)xcalloc(L * V, sizeof(float));
@@ -424,19 +472,27 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
         float *hidden_T = (float *)xcalloc(D * L, sizeof(float));
         float *g_head_b = (float *)xcalloc(D * V, sizeof(float));
 
-        #pragma omp for schedule(dynamic)
+#ifdef _OPENMP
+        tid = omp_get_thread_num();
+#endif
+        layer_ws = thread_ws[tid];
+
+#pragma omp for schedule(dynamic)
         for (size_t b = 0; b < batch_size; b++) {
             const uint8_t *seq     = &batch_tokens[b * Lp1];
             const uint8_t *tok_in  = seq;
             const uint8_t *tok_tgt = seq + 1;
 
-            /* Forward — lecture seule sur les poids, safe en parallèle */
             embed_lookup(m, &acts[0], tok_in);
-            for (size_t i = 0; i < m->cfg.n_layers; i++)
-                mamba_block_forward(m->layers[i], &acts[(i + 1) * L * D], &acts[i * L * D], 1);
+            for (size_t i = 0; i < n_layers; i++) {
+                mamba_block_forward_ws(m->layers[i], layer_ws[i],
+                                       &acts[(i + 1) * L * D],
+                                       &acts[i * L * D], 1);
+            }
 
-            const float *hidden = &acts[m->cfg.n_layers * L * D];
+            const float *hidden = &acts[n_layers * L * D];
             memset(logits, 0, L * V * sizeof(float));
+            memset(dlogits, 0, L * V * sizeof(float));
             gemm_avx2((float *)hidden, m->head, logits, (long)L, (long)D, (long)V);
 
             float sample_loss = 0.0f;
@@ -451,7 +507,6 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
             }
             total_loss += sample_loss * invL;
 
-            /* Backward dlogits → d_hidden */
             memset(d_hidden, 0, L * D * sizeof(float));
             gemm_avx2(dlogits, head_T, d_hidden, (long)L, (long)V, (long)D);
 
@@ -459,18 +514,19 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
             memset(g_head_b, 0, D * V * sizeof(float));
             gemm_avx2(hidden_T, dlogits, g_head_b, (long)D, (long)L, (long)V);
 
-            float *dcur  = d_hidden;
-            float *dnext = d_buf;
-
-            /* Backward à travers les couches — section critique (grads partagés) */
-            #pragma omp critical
+#pragma omp critical
             {
                 for (size_t i = 0; i < D * V; i++) g_head[i] += g_head_b[i];
-                for (size_t li = m->cfg.n_layers; li-- > 0;) {
+
+                float *dcur  = d_hidden;
+                float *dnext = d_buf;
+                for (size_t li = n_layers; li-- > 0;) {
                     memset(dnext, 0, L * D * sizeof(float));
-                    mamba_backward(m->layers[li], dcur, &acts[li * L * D], dnext, b);
+                    mamba_backward_ws(m->layers[li], layer_ws[li],
+                                      dcur, &acts[li * L * D], dnext, b);
                     float *tmp = dcur; dcur = dnext; dnext = tmp;
                 }
+
                 for (size_t t = 0; t < L; t++) {
                     float *g = &g_embed[(size_t)tok_in[t] * D];
                     const float *d = &dcur[t * D];
@@ -483,12 +539,33 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
         free(d_hidden); free(d_buf); free(hidden_T); free(g_head_b);
     }
 
-    for (size_t i = 0; i < m->cfg.n_layers; i++)
+    {
+        double grad_sq = sum_squares_f32(g_head, D * V)
+                       + sum_squares_f32(g_embed, V * D);
+        for (size_t i = 0; i < n_layers; i++)
+            grad_sq += (double)mamba_block_grad_sqnorm(m->layers[i]);
+        m->last_grad_norm = sqrtf((float)grad_sq);
+        m->last_grad_over_clip = (m->opt_blocks.clip_norm > 0.0f)
+                               ? (m->last_grad_norm / m->opt_blocks.clip_norm)
+                               : 0.0f;
+        m->last_grad_would_clip = (m->opt_blocks.clip_norm > 0.0f &&
+                                   m->last_grad_norm > m->opt_blocks.clip_norm);
+    }
+
+    for (size_t i = 0; i < n_layers; i++)
         mamba_optimizer_step(m->layers[i], &m->opt_blocks);
 
     m->step_embed_head++;
     ADAM_EH_UPDATE(m, m->embedding, g_embed, m->m_embedding, m->v_embedding, V * D);
     ADAM_EH_UPDATE(m, m->head,      g_head,  m->m_head,      m->v_head,      D * V);
+
+    for (int t = 0; t < n_threads; t++) {
+        if (!thread_ws || !thread_ws[t]) continue;
+        for (size_t li = 0; li < n_layers; li++)
+            mamba_block_workspace_free(thread_ws[t][li]);
+        free(thread_ws[t]);
+    }
+    free(thread_ws);
 
     free(g_head); free(g_embed); free(head_T);
 

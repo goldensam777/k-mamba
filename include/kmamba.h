@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include "optimatrix.h"
 #include "scan.h"
+#include "scan_nd.h"
+#include "wavefront_nd.h"
 
 /* ============================================================================
  * Basic Matrix type
@@ -71,6 +73,15 @@ typedef struct {
     float *scan_delta;     /* [seq_len x state_size] */
     float *scan_h;         /* [state_size] */
 } MambaBlock;
+
+typedef struct {
+    float *hidden;         /* [state_size] */
+    float *delta;          /* [seq_len] */
+    float *scan_B;         /* [seq_len x N*R] */
+    float *scan_C;         /* [seq_len x N*R] */
+    float *scan_delta;     /* [seq_len x state_size] */
+    float *scan_h;         /* [state_size] */
+} MambaBlockWorkspace;
 
 /* ============================================================================
  * Optimizer Types
@@ -169,6 +180,9 @@ typedef struct {
     float  *m_head;
     float  *v_head;
     size_t  step_embed_head;
+    float   last_grad_norm;
+    float   last_grad_over_clip;
+    int     last_grad_would_clip;
 } KMamba;
 
 /* ============================================================================
@@ -177,18 +191,26 @@ typedef struct {
 MambaBlock* mamba_block_create(const MBConfig *config);
 void        mamba_block_free(MambaBlock *block);
 void        mamba_block_init(MambaBlock *block);
+MambaBlockWorkspace* mamba_block_workspace_create(const MambaBlock *block);
+void                 mamba_block_workspace_free(MambaBlockWorkspace *ws);
 
 void mamba_block_forward(MambaBlock *block, float *output, const float *input,
                         size_t batch_size);
+void mamba_block_forward_ws(MambaBlock *block, MambaBlockWorkspace *ws,
+                            float *output, const float *input, size_t batch_size);
 
 /* Training functions */
 void mamba_attach_optimizer(MambaBlock *block, OptimizerType type, const MBOptimConfig *optconf);
 void mamba_free_optimizer(MambaBlock *block);
 void mamba_zero_grads(MambaBlock *block);
 void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf);
+float mamba_block_grad_sqnorm(const MambaBlock *block);
 
 void mamba_backward(MambaBlock *block, const float *dY, const float *input,
                     float *d_input, size_t batch_index);
+void mamba_backward_ws(MambaBlock *block, MambaBlockWorkspace *ws,
+                       const float *dY, const float *input,
+                       float *d_input, size_t batch_index);
 
 /* ============================================================================
  * Matrix Operations

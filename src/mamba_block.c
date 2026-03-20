@@ -51,7 +51,8 @@ typedef struct {
     float *x;         /* seq_len x state_size */
     float *A_diag;    /* seq_len x state_size */
     float *B_bar;     /* seq_len x state_size  (= dt * B_t  for Euler; reused for storage) */
-    float *u_seq;     /* seq_len x state_size (controller vectors per timestep) */
+    float *u_seq;     /* seq_len x R (controller vectors per timestep) */
+    float *C_seq;     /* seq_len x N*R (BCNorm'd C vectors per timestep) */
     float *h_rot;     /* seq_len x state_size  R(θ)·h_{t-1} at each step (for dA grad) */
     float *Bu;        /* seq_len x state_size  B_t * u_t at each timestep */
     float *lambda;    /* seq_len  scalar lambda_t at each timestep */
@@ -76,6 +77,10 @@ static float         project_delta_value(const MambaBlock *block, const float *x
                                          size_t total_positions);
 static void          transpose_row_major(const float *src, float *dst,
                                          size_t rows, size_t cols);
+static double        sum_squares_f32(const float *x, size_t n);
+static void          bind_default_workspace(MambaBlockWorkspace *ws, MambaBlock *block);
+static int           workspace_matches_block(const MambaBlock *block,
+                                             const MambaBlockWorkspace *ws);
 
 /* ============================================================================
  * Matrix Operations
@@ -199,6 +204,48 @@ static void transpose_row_major(const float *src, float *dst,
             dst[j * rows + i] = src[i * cols + j];
         }
     }
+}
+
+static double sum_squares_f32(const float *x, size_t n) {
+    double acc = 0.0;
+    if (!x) return 0.0;
+    for (size_t i = 0; i < n; i++) {
+        double v = (double)x[i];
+        acc += v * v;
+    }
+    return acc;
+}
+
+static void bind_default_workspace(MambaBlockWorkspace *ws, MambaBlock *block) {
+    if (!ws || !block) return;
+    ws->hidden     = block->hidden;
+    ws->delta      = block->delta;
+    ws->scan_B     = block->scan_B;
+    ws->scan_C     = block->scan_C;
+    ws->scan_delta = block->scan_delta;
+    ws->scan_h     = block->scan_h;
+}
+
+static int workspace_matches_block(const MambaBlock *block,
+                                   const MambaBlockWorkspace *ws) {
+    size_t state_size;
+    size_t seq_len;
+    size_t rank;
+
+    if (!block || !ws) return 0;
+    state_size = block->config.state_size;
+    seq_len = block->config.seq_len;
+    rank = _mimo_R(&block->config);
+
+    return ws->hidden &&
+           ws->delta &&
+           ws->scan_B &&
+           ws->scan_C &&
+           ws->scan_delta &&
+           ws->scan_h &&
+           state_size > 0 &&
+           seq_len > 0 &&
+           rank > 0;
 }
 
 /* ============================================================================
@@ -390,6 +437,51 @@ void mamba_block_free(MambaBlock *block) {
     free(block);
 }
 
+MambaBlockWorkspace* mamba_block_workspace_create(const MambaBlock *block) {
+    MambaBlockWorkspace *ws;
+    size_t state_size;
+    size_t seq_len;
+    size_t rank;
+    size_t scan_nr;
+    size_t scan_nd;
+
+    if (!block) return NULL;
+
+    state_size = block->config.state_size;
+    seq_len = block->config.seq_len;
+    rank = _mimo_R(&block->config);
+    scan_nr = seq_len * state_size * rank;
+    scan_nd = seq_len * state_size;
+
+    ws = (MambaBlockWorkspace *)calloc(1, sizeof(*ws));
+    if (!ws) return NULL;
+
+    ws->hidden     = (float *)calloc(state_size, sizeof(float));
+    ws->delta      = (float *)calloc(seq_len, sizeof(float));
+    ws->scan_B     = (float *)malloc(scan_nr * sizeof(float));
+    ws->scan_C     = (float *)malloc(scan_nr * sizeof(float));
+    ws->scan_delta = (float *)malloc(scan_nd * sizeof(float));
+    ws->scan_h     = (float *)calloc(state_size, sizeof(float));
+
+    if (!workspace_matches_block(block, ws)) {
+        mamba_block_workspace_free(ws);
+        return NULL;
+    }
+
+    return ws;
+}
+
+void mamba_block_workspace_free(MambaBlockWorkspace *ws) {
+    if (!ws) return;
+    free(ws->hidden);
+    free(ws->delta);
+    free(ws->scan_B);
+    free(ws->scan_C);
+    free(ws->scan_delta);
+    free(ws->scan_h);
+    free(ws);
+}
+
 void mamba_block_init(MambaBlock *block) {
     if (!block) return;
 
@@ -579,6 +671,46 @@ void mamba_zero_grads(MambaBlock *block) {
             return;
         }
     }
+}
+
+float mamba_block_grad_sqnorm(const MambaBlock *block) {
+    MBOptimState *s;
+    size_t dim;
+    size_t state;
+    size_t R;
+    size_t size_in;
+    size_t size_out;
+    size_t size_bc;
+    size_t theta_size;
+    double acc = 0.0;
+
+    if (!block) return 0.0f;
+
+    s = _find_opt((MambaBlock *)block);
+    if (!s) return 0.0f;
+
+    dim = block->config.dim;
+    state = block->config.state_size;
+    R = _mimo_R(&block->config);
+
+    size_in = R * dim;
+    size_out = dim * R;
+    size_bc = state * R * dim;
+    theta_size = state / 2;
+    if (theta_size == 0) theta_size = 1;
+
+    acc += sum_squares_f32(s->g_W_in,        size_in);
+    acc += sum_squares_f32(s->g_W_out,       size_out);
+    acc += sum_squares_f32(s->g_A_log,       state);
+    acc += sum_squares_f32(s->g_W_B,         size_bc);
+    acc += sum_squares_f32(s->g_W_C,         size_bc);
+    acc += sum_squares_f32(s->g_b_B,         state * R);
+    acc += sum_squares_f32(s->g_b_C,         state * R);
+    acc += sum_squares_f32(s->g_delta_proj,  dim);
+    acc += sum_squares_f32(s->g_lambda_proj, dim);
+    acc += sum_squares_f32(s->g_theta,       theta_size);
+
+    return (float)acc;
 }
 
 static MBOptimState* _find_opt(MambaBlock *block) {
@@ -785,6 +917,7 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
                     const float *input_u,     /* [seq_len x R] SiLU(W_in x) */
                     const float *delta,
                     const MBMatrix *A_bar, const float *B_seq,  /* [seq_len x N*R] */
+                    const float *C_seq,                          /* [seq_len x N*R] */
                     const MBMatrix *C, float D_unused,
                     const float *theta,
                     const float *input_flat,  /* [seq_len x dim] raw embeddings */
@@ -798,6 +931,7 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
     store->B_bar  = (float *)calloc(seq_len * state_size, sizeof(float));
     /* u_seq stored as [seq_len x R] */
     store->u_seq  = (float *)calloc(seq_len * R_rank, sizeof(float));
+    store->C_seq  = (float *)calloc(seq_len * state_size * R_rank, sizeof(float));
     store->h_rot  = (float *)calloc(seq_len * state_size, sizeof(float));
     /* Bu stored as [seq_len x N]: Bu_t[n] = sum_r B_t[n,r]*u_t[r] */
     store->Bu     = (float *)calloc(seq_len * state_size, sizeof(float));
@@ -817,6 +951,11 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
 
         /* Store u_t in [seq_len x R] layout */
         for (size_t r = 0; r < R_rank; r++) store->u_seq[t * R_rank + r] = u_t[r];
+        if (store->C_seq && C_seq) {
+            memcpy(&store->C_seq[t * state_size * R_rank],
+                   &C_seq[t * state_size * R_rank],
+                   state_size * R_rank * sizeof(float));
+        }
 
         /* Compute lambda_t = sigmoid(lambda_proj · x_t) */
         float lam_t = 0.5f;
@@ -885,11 +1024,12 @@ static void selective_scan_forward_store(ForwardStore *store, float *state,
  * ============================================================================ */
 
 static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
+                                    const MambaBlockWorkspace *ws,
                                     const float *dY, const float *input_flat,
                                     float *d_input_out,
                                     const float *theta,
                                     size_t seq_len, size_t state_size, size_t R_rank) {
-    if (!store || !block) return;
+    if (!store || !block || !ws) return;
     size_t dim = block->config.dim;
 
     MBOptimState *s = _find_opt(block);
@@ -914,29 +1054,30 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
     float *contrib_T = (float *)calloc(R_rank * seq_len, sizeof(float));
     size_t z_size = (R_rank > state_size) ? R_rank : state_size;
     float *z         = (float *)malloc(z_size * sizeof(float));
-    /* C_t_mat: [N*R] — per-timestep full C matrix */
-    float *C_t_mat   = (float *)malloc(state_size * R_rank * sizeof(float));
     float *adj_h     = (float *)calloc(state_size, sizeof(float));
     /* Per-timestep B/C gradients: dB_t [seq_len x N*R], dC_t [seq_len x N*R] */
     float *dB_seq    = (float *)calloc(seq_len * state_size * R_rank, sizeof(float));
     float *dC_seq    = (float *)calloc(seq_len * state_size * R_rank, sizeof(float));
 
     if (!scan_out || !dY_T || !adj_y_R || !adj_y || !scan_du || !scan_dA ||
-        !scan_ddelta || !contrib_T || !z || !C_t_mat || !adj_h || !dB_seq || !dC_seq) {
+        !scan_ddelta || !contrib_T || !z || !adj_h || !dB_seq || !dC_seq) {
         free(scan_out); free(dY_T); free(adj_y_R); free(adj_y); free(scan_du); free(scan_dA);
-        free(scan_ddelta); free(contrib_T); free(z); free(C_t_mat); free(adj_h);
+        free(scan_ddelta); free(contrib_T); free(z); free(adj_h);
         free(dB_seq); free(dC_seq);
         return;
     }
 
-    /* Recompute scan_out_R[t,r] = sum_n C_t[n,r] * h_t[n] (MIMO: C^T @ h) for W_out grad */
+    /* Recompute scan_out_R[t,r] = sum_n C_t[n,r] * h_t[n] (MIMO: C^T @ h) for W_out grad.
+     * Use the same BCNorm'd C_t that the forward path used.
+     */
     for (size_t t = 0; t < seq_len; t++) {
-        mb_matrix_vec_mult(C_t_mat, &block->W_C, &input_flat[t * dim]);
-        /* C_t_mat is [N*R] with layout [r*N + n]; scan_out[t,r] = sum_n C_t_mat[r*N+n]*h[n] */
+        const float *c_t = store->C_seq ? &store->C_seq[t * state_size * R_rank] : NULL;
+        if (!c_t) continue;
+        /* c_t is [N*R] with layout [r*N + n]; scan_out[t,r] = sum_n c_t[r*N+n] * h[n] */
         for (size_t r = 0; r < R_rank; r++) {
             float yr = 0.0f;
             for (size_t n = 0; n < state_size; n++)
-                yr += C_t_mat[r * state_size + n] * store->x[t * state_size + n];
+                yr += c_t[r * state_size + n] * store->x[t * state_size + n];
             scan_out[t * R_rank + r] = yr;
         }
     }
@@ -952,15 +1093,16 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
     gemm_avx2((float *)dY, block->W_out.data, adj_y_R,
               (long)seq_len, (long)dim, (long)R_rank);
 
-    /* From adj_y_R [L x R] and C_t [N*R], compute adj_y [L x N] = C_t @ adj_y_R_t:
+    /* From adj_y_R [L x R] and BCNorm'd C_t [N*R], compute adj_y [L x N] = C_t @ adj_y_R_t:
      * adj_y[t,n] = sum_r C_t[n,r] * adj_y_R[t,r]    (adjoint of y_t = C_t^T @ h_t) */
     for (size_t t = 0; t < seq_len; t++) {
-        mb_matrix_vec_mult(C_t_mat, &block->W_C, &input_flat[t * dim]);
-        /* C_t_mat[r*N + n] = C_t[n,r]; adj_y[t,n] = sum_r C_t[n,r] * adj_y_R[t,r] */
+        const float *c_t = store->C_seq ? &store->C_seq[t * state_size * R_rank] : NULL;
+        if (!c_t) continue;
+        /* c_t[r*N + n] = C_t[n,r]; adj_y[t,n] = sum_r C_t[n,r] * adj_y_R[t,r] */
         for (size_t n = 0; n < state_size; n++) {
             float a = 0.0f;
             for (size_t r = 0; r < R_rank; r++)
-                a += C_t_mat[r * state_size + n] * adj_y_R[t * R_rank + r];
+                a += c_t[r * state_size + n] * adj_y_R[t * R_rank + r];
             adj_y[t * state_size + n] = a;
         }
     }
@@ -989,11 +1131,8 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
     }
 
     for (long t = (long)seq_len - 1; t >= 0; t--) {
-        float dt_t    = block->delta[t];
+        float dt_t    = ws->delta[t];
         float lam_t   = store->lambda ? store->lambda[t] : 0.5f;
-        /* C_t_mat: [N*R] for MIMO C gradient */
-        mb_matrix_vec_mult(C_t_mat, &block->W_C, &input_flat[t * dim]);
-
         /* d_h_rot[d] holds intermediate: ah * alpha_t */
         float *d_h_rot = (float *)malloc(state_size * sizeof(float));
         if (!d_h_rot) continue;
@@ -1029,7 +1168,7 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
             /* MIMO dB_t[n,r] = d_bu_t * u_t[r],   scan_du[t,r] += d_bu_t * B_t[n,r]
              * B_seq[t * N*R + r*N + d] = B_t[d,r] */
             for (size_t r = 0; r < R_rank; r++) {
-                float b_nr = block->scan_B[t * state_size * R_rank + r * state_size + d];
+                float b_nr = ws->scan_B[t * state_size * R_rank + r * state_size + d];
                 float u_r  = store->u_seq[t * R_rank + r];
                 dB_seq[t * state_size * R_rank + r * state_size + d] = d_bu_t * u_r;
                 scan_du[t * R_rank + r] += d_bu_t * b_nr;
@@ -1231,7 +1370,7 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
             d_input_out[i] += dY[i];
     }
 
-    free(scan_out); free(dY_T); free(z); free(C_t_mat); free(adj_y_R); free(adj_y);
+    free(scan_out); free(dY_T); free(z); free(adj_y_R); free(adj_y);
     free(scan_du); free(scan_dA); free(scan_ddelta); free(contrib_T);
     free(adj_h); free(dB_seq); free(dC_seq);
 }
@@ -1240,11 +1379,14 @@ static void selective_scan_backward(ForwardStore *store, MambaBlock *block,
  * Backward entrypoint
  * ============================================================================ */
 
-void mamba_backward(MambaBlock *block, const float *dY, const float *input,
-                    float *d_input, size_t batch_index) {
+void mamba_backward_ws(MambaBlock *block, MambaBlockWorkspace *ws,
+                       const float *dY, const float *input,
+                       float *d_input, size_t batch_index) {
     (void)batch_index;
     size_t seq_len = block->config.seq_len;
     size_t state_size = block->config.state_size;
+
+    if (!block || !ws || !workspace_matches_block(block, ws)) return;
 
     MBMatrix *A_bar = mb_matrix_create(state_size, state_size);
     for (size_t i = 0; i < state_size; i++) A_bar->data[i * state_size + i] = block->A_log.data[i];
@@ -1257,9 +1399,12 @@ void mamba_backward(MambaBlock *block, const float *dY, const float *input,
 
     /* u_seq: [L x R] — MIMO input from W_in */
     float *u_seq  = (float *)calloc(seq_len * R_rank, sizeof(float));
-    /* B_seq: [L x N*R] — BCNorm'd B matrix per timestep */
+    /* B_seq/C_seq: [L x N*R] — BCNorm'd B/C matrices per timestep */
     float *B_seq  = (float *)malloc(seq_len * state_size * R_rank * sizeof(float));
-    if (!u_seq || !B_seq) { free(u_seq); free(B_seq); mb_matrix_free(A_bar); return; }
+    float *C_seq  = (float *)malloc(seq_len * state_size * R_rank * sizeof(float));
+    if (!u_seq || !B_seq || !C_seq) {
+        free(u_seq); free(B_seq); free(C_seq); mb_matrix_free(A_bar); return;
+    }
 
     float *tmp_delta = (float *)calloc(block->delta_proj.rows ? block->delta_proj.rows : 1,
                                         sizeof(float));
@@ -1277,49 +1422,69 @@ void mamba_backward(MambaBlock *block, const float *dY, const float *input,
         for (size_t t = 0; t < seq_len; t++) {
             const float *x_t = &input[t * dim];
             project_controller(block, x_t, z, &u_seq[t * R_rank]);
-            block->delta[t] = project_delta_value(block, x_t, tmp_delta, t, seq_len);
+            ws->delta[t] = project_delta_value(block, x_t, tmp_delta, t, seq_len);
 
             /* B_seq[t] = BCNorm(W_B · x_t) per rank-slice [N*R] */
             float *b_t = &B_seq[t * NR];
+            float *c_t = &C_seq[t * NR];
             mb_matrix_vec_mult(b_t, &block->W_B, x_t);
+            mb_matrix_vec_mult(c_t, &block->W_C, x_t);
             for (size_t r = 0; r < R_rank; r++) {
                 float *b_r = b_t + r * state_size;
+                float *c_r = c_t + r * state_size;
                 float rms = 0.0f;
-                for (size_t d = 0; d < state_size; d++) rms += b_r[d] * b_r[d];
+                float rms_c = 0.0f;
+                for (size_t d = 0; d < state_size; d++) {
+                    rms += b_r[d] * b_r[d];
+                    rms_c += c_r[d] * c_r[d];
+                }
                 rms = 1.0f / sqrtf(rms / (float)state_size + eps);
+                rms_c = 1.0f / sqrtf(rms_c / (float)state_size + eps);
                 for (size_t d = 0; d < state_size; d++)
                     b_r[d] = b_r[d] * rms + block->b_B[r * state_size + d];
+                for (size_t d = 0; d < state_size; d++)
+                    c_r[d] = c_r[d] * rms_c + block->b_C[r * state_size + d];
             }
         }
     }
     free(z);
     free(tmp_delta);
 
-    selective_scan_forward_store(&store, block->hidden, u_seq, block->delta,
-                                A_bar, B_seq, &block->W_C, 0.0f,
+    selective_scan_forward_store(&store, ws->hidden, u_seq, ws->delta,
+                                A_bar, B_seq, C_seq, &block->W_C, 0.0f,
                                 block->theta,
                                 input, &block->lambda_proj,
                                 seq_len, state_size, dim, R_rank);
 
-    selective_scan_backward(&store, block, dY, input, d_input,
+    selective_scan_backward(&store, block, ws, dY, input, d_input,
                             block->theta, seq_len, state_size, R_rank);
 
     free(store.x); free(store.A_diag); free(store.B_bar); free(store.u_seq);
     if (store.h_rot)  free(store.h_rot);
     if (store.Bu)     free(store.Bu);
+    if (store.C_seq)  free(store.C_seq);
     if (store.lambda) free(store.lambda);
     if (store.alpha)  free(store.alpha);
-    free(u_seq); free(B_seq);
+    free(u_seq); free(B_seq); free(C_seq);
     mb_matrix_free(A_bar);
+}
+
+void mamba_backward(MambaBlock *block, const float *dY, const float *input,
+                    float *d_input, size_t batch_index) {
+    MambaBlockWorkspace ws;
+    if (!block) return;
+    bind_default_workspace(&ws, block);
+    mamba_backward_ws(block, &ws, dY, input, d_input, batch_index);
 }
 
 /* ============================================================================
  * Forward pass — 1D
  * ============================================================================ */
 
-void mamba_block_forward(MambaBlock *block, float *output, const float *input,
-                         size_t batch_size) {
-    if (!block || !output || !input) return;
+void mamba_block_forward_ws(MambaBlock *block, MambaBlockWorkspace *ws,
+                            float *output, const float *input,
+                            size_t batch_size) {
+    if (!block || !ws || !output || !input || !workspace_matches_block(block, ws)) return;
 
     size_t seq_len = block->config.seq_len;
     size_t dim = block->config.dim;
@@ -1350,7 +1515,7 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
             const float *x_t = &batch_input[t * dim];
             /* W_in is [R x dim] → output is R-dimensional */
             project_controller(block, x_t, z, &u_seq[t * R_rank]);
-            block->delta[t] = project_delta_value(block, x_t, tmp_delta, t, seq_len);
+            ws->delta[t] = project_delta_value(block, x_t, tmp_delta, t, seq_len);
         }
         free(z);
         free(tmp_delta);
@@ -1370,8 +1535,8 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
             long NR = (long)(state_size * R_rank);
             for (long t = 0; t < L; t++) {
                 const float *x_t = &batch_input[t * dim];
-                float *b_out = &block->scan_B[t * NR];
-                float *c_out = &block->scan_C[t * NR];
+                float *b_out = &ws->scan_B[t * NR];
+                float *c_out = &ws->scan_C[t * NR];
 
                 /* B_flat[N*R] = W_B[N*R x dim] @ x_t */
                 mb_matrix_vec_mult(b_out, &block->W_B, x_t);
@@ -1395,10 +1560,10 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
                 }
 
                 for (long d = 0; d < D; d++)
-                    block->scan_delta[t*D + d] = block->delta[t];
+                    ws->scan_delta[t*D + d] = ws->delta[t];
             }
         }
-        memset(block->scan_h, 0, (size_t)D * sizeof(float));
+        memset(ws->scan_h, 0, (size_t)D * sizeof(float));
 
         /* Complex SSM scan with R(θ) rotation + exp-trapezoidal discretization
          * (Mamba-3 §3.1 + §3.2) with MIMO (rank R)
@@ -1409,7 +1574,7 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
          */
         {
             long NR = (long)(state_size * R_rank);
-            float *h_cur    = block->scan_h;
+            float *h_cur    = ws->scan_h;
             float *h_rot    = (float *)malloc((size_t)D * sizeof(float));
             float *prev_Bu  = (float *)calloc((size_t)D, sizeof(float));
             float *Bu_cur   = (float *)malloc((size_t)D * sizeof(float));
@@ -1422,11 +1587,11 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
             }
 
             for (long t = 0; t < L; t++) {
-                float dt_t = block->delta[t];
+                float dt_t = ws->delta[t];
                 const float *x_t = &batch_input[t * dim];
                 const float *u_t = &u_seq[t * R_rank];     /* u_t ∈ R^R */
-                const float *b_t = &block->scan_B[t * NR]; /* B_t[N*R] */
-                const float *c_t = &block->scan_C[t * NR]; /* C_t[N*R] */
+                const float *b_t = &ws->scan_B[t * NR]; /* B_t[N*R] */
+                const float *c_t = &ws->scan_C[t * NR]; /* C_t[N*R] */
 
                 /* lambda_t = sigmoid(lambda_proj · x_t) */
                 mb_matrix_vec_mult(lam_buf, &block->lambda_proj, x_t);
@@ -1476,7 +1641,7 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
             }
             free(h_rot); free(prev_Bu); free(lam_buf); free(Bu_cur); free(y_rank);
         }
-        memcpy(block->hidden, block->scan_h, (size_t)D * sizeof(float));
+        memcpy(ws->hidden, ws->scan_h, (size_t)D * sizeof(float));
 
         float *ybuf = (float *)malloc(dim * sizeof(float));
         if (ybuf) {
@@ -1496,3 +1661,10 @@ void mamba_block_forward(MambaBlock *block, float *output, const float *input,
     }
 }
 
+void mamba_block_forward(MambaBlock *block, float *output, const float *input,
+                         size_t batch_size) {
+    MambaBlockWorkspace ws;
+    if (!block) return;
+    bind_default_workspace(&ws, block);
+    mamba_block_forward_ws(block, &ws, output, input, batch_size);
+}

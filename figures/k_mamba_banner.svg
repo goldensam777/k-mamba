@@ -1,0 +1,56 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">K-Mamba banner</title>
+  <desc id="desc">Wordmark for k-mamba, a native Mamba-3 C and ASM stack for edge computing on constrained hardware.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111F"/>
+      <stop offset="0.52" stop-color="#0A1C33"/>
+      <stop offset="1" stop-color="#102B4E"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="232" y1="50" x2="928" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EAF4FF"/>
+      <stop offset="0.55" stop-color="#B6D8FF"/>
+      <stop offset="1" stop-color="#6FB5FF"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8BD0FF"/>
+      <stop offset="1" stop-color="#2E8FFF"/>
+    </linearGradient>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#1C3352" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="320" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="320" rx="28" fill="url(#grid)" opacity="0.35"/>
+
+  <g opacity="0.9">
+    <path d="M54 58H126" stroke="#8BD0FF" stroke-width="4" stroke-linecap="round"/>
+    <path d="M1012 254H1146" stroke="#8BD0FF" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="86" cy="58" r="6" fill="#8BD0FF"/>
+    <circle cx="1106" cy="254" r="6" fill="#8BD0FF"/>
+  </g>
+
+  <g opacity="0.24">
+    <path d="M462 170C545 170 607 132 692 132C772 132 823 164 889 164C962 164 1021 136 1088 92" stroke="#6FB5FF" stroke-width="3" stroke-linecap="round"/>
+    <path d="M510 220C579 220 640 188 709 188C783 188 832 210 891 210C958 210 1017 181 1080 181" stroke="#2E8FFF" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#softGlow)">
+    <path d="M868 72C922 72 965 116 965 170C965 224 922 268 868 268H832C814 268 800 254 800 236C800 218 814 204 832 204H866C885 204 901 189 901 170C901 151 885 136 866 136H760C742 136 728 122 728 104C728 86 742 72 760 72H868Z" fill="#153C6B" opacity="0.34"/>
+  </g>
+
+  <g>
+    <text x="144" y="70" fill="#8BD0FF" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="21" letter-spacing="4.5">NATIVE MAMBA-3 FOR THE EDGE</text>
+    <text x="84" y="182" fill="url(#ink)" font-family="'Segoe UI', 'Trebuchet MS', Helvetica, Arial, sans-serif" font-size="102" font-weight="700" letter-spacing="1.5">K-Mamba</text>
+    <text x="86" y="230" fill="#DCEEFF" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="22">C / ASM / CUDA   •   ND wavefront scans   •   edge on constrained hardware</text>
+  </g>
+</svg>

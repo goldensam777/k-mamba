@@ -7,6 +7,7 @@ set(CMAKE_CUDA_STANDARD 17)
 # Mamba-specific CUDA kernels
 set(CUDA_SRCS
     scan1d.cu
+    scan_nd.cu
     scan1d_backward.cu
     mamba_scan.cu
     mamba_block.cu
