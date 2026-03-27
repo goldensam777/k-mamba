@@ -1,6 +1,8 @@
 #ifndef KMAMBA_SCAN_ND_H
 #define KMAMBA_SCAN_ND_H
 
+#include "wavefront_plan.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,7 +41,7 @@ typedef struct {
     const long  *dims;
     long         ndims;
     long         D;
-    long         M;
+    long         M;      /* scan state_size ; distinct de tout kernel_size conv */
     const float *x;
     const float *A;
     const float *B;
@@ -54,6 +56,9 @@ int scannd_validate(const ScanNDParams *p);
 
 /* Implémentation de référence (scalaire, ordonnancement wavefront ND). */
 int scannd_ref(ScanNDParams *p);
+
+/* Variante de référence réutilisant un plan wavefront déjà construit. */
+int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan);
 
 /* Alias courant vers l'implémentation de référence. */
 int scannd(ScanNDParams *p);

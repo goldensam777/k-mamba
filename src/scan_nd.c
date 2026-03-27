@@ -4,13 +4,7 @@
 #include <stdlib.h>
 
 #include "scan.h"
-#include "wavefront_nd.h"
-
-typedef struct {
-    ScanNDParams *p;
-    long total_points;
-    long *strides;
-} ScanNDRefCtx;
+#include "wavefront_plan.h"
 
 static int scannd_build_strides(const long *dims, long ndims, long *strides) {
     long stride = 1;
@@ -25,58 +19,16 @@ static int scannd_build_strides(const long *dims, long ndims, long *strides) {
     return 1;
 }
 
-static int scannd_visit(const long *idx,
-                        long ndims,
-                        long level,
-                        long ordinal_in_level,
-                        void *user) {
-    ScanNDRefCtx *ctx = (ScanNDRefCtx *)user;
-    ScanNDParams *p;
-    long offset;
+static void scannd_offset_to_idx(long offset,
+                                 const long *dims,
+                                 const long *strides,
+                                 long ndims,
+                                 long *idx) {
+    if (!dims || !strides || !idx || ndims <= 0) return;
 
-    (void)level;
-    (void)ordinal_in_level;
-
-    if (!ctx || !ctx->p || !idx) return -1;
-    p = ctx->p;
-
-    offset = wavefront_nd_row_major_offset(p->dims, idx, ndims);
-    if (offset < 0 || offset >= ctx->total_points) return -1;
-
-    for (long d = 0; d < p->D; d++) {
-        float x_val = p->x[offset * p->D + d];
-        float dt_bar = 0.0f;
-        float y_acc = 0.0f;
-
-        for (long axis = 0; axis < ndims; axis++) {
-            dt_bar += p->delta[(axis * ctx->total_points + offset) * p->D + d];
-        }
-        dt_bar /= (float)ndims;
-
-        for (long m = 0; m < p->M; m++) {
-            long dm = d * p->M + m;
-            long pdm = offset * p->D * p->M + dm;
-            float h_new = dt_bar * p->B[pdm] * x_val;
-
-            for (long axis = 0; axis < ndims; axis++) {
-                if (idx[axis] > 0) {
-                    long prev_offset = offset - ctx->strides[axis];
-                    float dt_axis = p->delta[(axis * ctx->total_points + offset) * p->D + d];
-                    float a_val = p->A[(axis * p->D + d) * p->M + m];
-                    float decay = expf(dt_axis * a_val);
-                    long prev_pdm = prev_offset * p->D * p->M + dm;
-                    h_new += decay * p->h[prev_pdm];
-                }
-            }
-
-            p->h[pdm] = h_new;
-            y_acc += p->C[pdm] * h_new;
-        }
-
-        p->y[offset * p->D + d] = y_acc;
+    for (long axis = 0; axis < ndims; axis++) {
+        idx[axis] = (offset / strides[axis]) % dims[axis];
     }
-
-    return 0;
 }
 
 int scannd_validate(const ScanNDParams *p) {
@@ -93,31 +45,102 @@ int scannd_validate(const ScanNDParams *p) {
     return 1;
 }
 
-int scannd_ref(ScanNDParams *p) {
-    ScanNDRefCtx ctx;
+int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan) {
     long total_points;
     long *strides;
+    long *idx;
+
+    if (!scannd_validate(p)) return -1;
+    if (!km_wavefront_plan_matches_dims(plan, p->dims, p->ndims)) return -1;
+
+    total_points = plan->total_points;
+    if (total_points <= 0) return -1;
+
+    strides = (long *)malloc((size_t)p->ndims * sizeof(long));
+    idx = (long *)malloc((size_t)p->ndims * sizeof(long));
+    if (!strides || !idx) {
+        free(strides);
+        free(idx);
+        return -1;
+    }
+    if (!scannd_build_strides(p->dims, p->ndims, strides)) {
+        free(strides);
+        free(idx);
+        return -1;
+    }
+
+    for (long level = 0; level <= plan->max_level; level++) {
+        const long *level_offsets = km_wavefront_plan_level_offsets(plan, level);
+        long level_size = km_wavefront_plan_level_size(plan, level);
+        if (!level_offsets || level_size < 0) {
+            free(strides);
+            free(idx);
+            return -1;
+        }
+
+        for (long point = 0; point < level_size; point++) {
+            long offset = level_offsets[point];
+
+            if (offset < 0 || offset >= total_points) {
+                free(strides);
+                free(idx);
+                return -1;
+            }
+
+            scannd_offset_to_idx(offset, p->dims, strides, p->ndims, idx);
+
+            for (long d = 0; d < p->D; d++) {
+                float x_val = p->x[offset * p->D + d];
+                float dt_bar = 0.0f;
+                float y_acc = 0.0f;
+
+                for (long axis = 0; axis < p->ndims; axis++) {
+                    dt_bar += p->delta[(axis * total_points + offset) * p->D + d];
+                }
+                dt_bar /= (float)p->ndims;
+
+                for (long m = 0; m < p->M; m++) {
+                    long dm = d * p->M + m;
+                    long pdm = offset * p->D * p->M + dm;
+                    float h_new = dt_bar * p->B[pdm] * x_val;
+
+                    for (long axis = 0; axis < p->ndims; axis++) {
+                        if (idx[axis] > 0) {
+                            long prev_offset = offset - strides[axis];
+                            float dt_axis = p->delta[(axis * total_points + offset) * p->D + d];
+                            float a_val = p->A[(axis * p->D + d) * p->M + m];
+                            float decay = expf(dt_axis * a_val);
+                            long prev_pdm = prev_offset * p->D * p->M + dm;
+                            h_new += decay * p->h[prev_pdm];
+                        }
+                    }
+
+                    p->h[pdm] = h_new;
+                    y_acc += p->C[pdm] * h_new;
+                }
+
+                p->y[offset * p->D + d] = y_acc;
+            }
+        }
+    }
+
+    free(strides);
+    free(idx);
+    return 0;
+}
+
+int scannd_ref(ScanNDParams *p) {
+    KMWavefrontPlan *plan;
     int rc;
 
     if (!scannd_validate(p)) return -1;
 
-    total_points = wavefront_nd_total_points(p->dims, p->ndims);
-    if (total_points <= 0) return -1;
+    plan = km_wavefront_plan_create(p->dims, p->ndims);
+    if (!plan) return -1;
 
-    strides = (long *)malloc((size_t)p->ndims * sizeof(long));
-    if (!strides) return -1;
-    if (!scannd_build_strides(p->dims, p->ndims, strides)) {
-        free(strides);
-        return -1;
-    }
-
-    ctx.p = p;
-    ctx.total_points = total_points;
-    ctx.strides = strides;
-
-    rc = wavefront_nd_for_each_level(p->dims, p->ndims, NULL, scannd_visit, &ctx);
-    free(strides);
-    return (rc == 0) ? 0 : -1;
+    rc = scannd_ref_with_plan(p, plan);
+    km_wavefront_plan_free(plan);
+    return rc;
 }
 
 int scannd(ScanNDParams *p) {

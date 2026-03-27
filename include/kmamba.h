@@ -5,7 +5,10 @@
 #include <stdint.h>
 #include "scan.h"
 #include "scan_nd.h"
+#include "wavefront_plan.h"
 #include "wavefront_nd.h"
+
+#define KMAMBA_MAX_NDIMS 8
 
 /* ============================================================================
  * Optimizer Config (previously from optimatrix.h)
@@ -54,6 +57,30 @@ ConvNDWorkspace* convnd_workspace_create(const ConvNDParams *p);
 void convnd_workspace_free(ConvNDWorkspace *ws);
 void convnd(ConvNDParams *p, ConvNDMode mode, ConvNDWorkspace *ws);
 
+/* Full ConvND depthwise reference API.
+ * Kernel layout is [K^ndims, D] with the last axis varying fastest.
+ * The support is causal on every axis, matching the existing separable ConvND. */
+typedef struct {
+    const float *input;   /* Input tensor [prod(dims), D] */
+    const float *kernel;  /* Full kernel [K^ndims, D] */
+    const float *bias;    /* Bias [D] or NULL */
+    float *output;        /* Output tensor [prod(dims), D] */
+    const float *dy;      /* Gradient w.r.t. output [prod(dims), D] */
+    float *dinput;        /* Gradient w.r.t. input [prod(dims), D] */
+    float *dkernel;       /* Gradient w.r.t. kernel [K^ndims, D] */
+    float *dbias;         /* Gradient w.r.t. bias [D] or NULL */
+    const long *dims;     /* Spatial shape [ndims] */
+    long ndims;           /* Number of spatial dimensions */
+    long D;               /* Depth/channels */
+    long K;               /* conv kernel_size ; distinct du state_size du scan */
+} ConvNDFullParams;
+
+long convnd_full_kernel_volume(long ndims, long K);
+void convnd_full_ref(ConvNDFullParams *p, ConvNDMode mode);
+void convnd_full_ref_with_plan(ConvNDFullParams *p,
+                               const KMWavefrontPlan *plan,
+                               ConvNDMode mode);
+
 /* ============================================================================
  * Basic Matrix type
  * ============================================================================ */
@@ -76,10 +103,15 @@ typedef struct {
     float dt_min;
     float dt_max;
 
+    /* Shared ND topology for scanND / convND.
+     * spatial_ndims == 0 means the implicit 1D shape [seq_len]. */
+    long   spatial_ndims;
+    long   spatial_dims[KMAMBA_MAX_NDIMS];
+
     /* ConvND parameters */
-    int    use_convnd;     /* 0 = disable, 1 = enable ConvND avant scan */
-    long   convnd_K;       /* Taille du noyau ConvND (K>=1) */
-    long   convnd_ndims;   /* Nombre de dimensions spatiales (1, 2, ou 3) */
+    int    use_convnd;     /* 0 = disable, 1 = enable ConvND locale */
+    long   convnd_K;       /* Conv kernel_size (K>=1), distinct du state_size */
+    long   convnd_ndims;   /* 0 => dérivé de spatial_ndims ; sinon doit matcher */
 } MBConfig;
 
 /* ============================================================================
@@ -105,6 +137,9 @@ typedef struct {
 
     /* Exp-Trapezoidal discretization (Mamba-3 §3.1) */
     MBMatrix lambda_proj; /* [1 x dim] — projects x_t -> scalar lambda_t (sigmoid -> [0,1]) */
+
+    /* Shared ND execution topology reused by scanND / convND. */
+    KMWavefrontPlan *wavefront_plan;
     
     /* ConvND parameters */
     float *convnd_kernel;  /* [convnd_ndims * convnd_K * dim] */
@@ -198,10 +233,15 @@ typedef struct {
     float dt_min;
     float dt_max;
 
+    /* Shared ND topology for scanND / convND.
+     * spatial_ndims == 0 means the implicit 1D shape [seq_len]. */
+    long   spatial_ndims;
+    long   spatial_dims[KMAMBA_MAX_NDIMS];
+
     /* ConvND parameters (optionnel) */
-    int    use_convnd;     /* 0 = disable, 1 = enable ConvND avant scan */
-    long   convnd_K;       /* Taille du noyau ConvND (K>=1) */
-    long   convnd_ndims;   /* Nombre de dimensions spatiales (1, 2, ou 3) */
+    int    use_convnd;     /* 0 = disable, 1 = enable ConvND locale */
+    long   convnd_K;       /* Conv kernel_size (K>=1), distinct du state_size */
+    long   convnd_ndims;   /* 0 => dérivé de spatial_ndims ; sinon doit matcher */
 } KMambaConfig;
 
 typedef struct {

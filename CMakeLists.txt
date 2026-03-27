@@ -10,8 +10,8 @@ option(KMAMBA_BUILD_EXAMPLES "Build examples" OFF)
 option(KMAMBA_BUILD_CPU "Build CPU backend" ON)
 option(KMAMBA_BUILD_CUDA "Build CUDA backend" OFF)
 
-# Add optimatrix submodule ONLY for CUDA optimizer utilities
-if(KMAMBA_BUILD_CUDA)
+# Add optimatrix when CUDA or tests need its exported targets
+if(KMAMBA_BUILD_CUDA OR KMAMBA_BUILD_TESTS)
     add_subdirectory(optimatrix)
 endif()
 
@@ -35,6 +35,7 @@ set(KMAMBA_C_SRCS
     src/mamba_block.c
     src/convnd.c
     src/scan_nd.c
+    src/wavefront_plan.c
     src/wavefront_nd.c
     src/openblas_utils.c
 )
@@ -72,7 +73,6 @@ target_compile_options(k-mamba PRIVATE
 
 if(OpenMP_C_FOUND)
     target_link_libraries(k-mamba PUBLIC OpenMP::OpenMP_C)
-    target_compile_definitions(k-mamba PRIVATE _OPENMP)
 endif()
 
 if(KMAMBA_BUILD_CUDA)

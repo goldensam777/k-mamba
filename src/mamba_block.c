@@ -81,6 +81,9 @@ static double        sum_squares_f32(const float *x, size_t n);
 static void          bind_default_workspace(MambaBlockWorkspace *ws, MambaBlock *block);
 static int           workspace_matches_block(const MambaBlock *block,
                                              const MambaBlockWorkspace *ws);
+static int           spatial_dims_product(const long *dims, long ndims,
+                                          size_t *product_out);
+static int           normalize_spatial_topology(MBConfig *cfg);
 
 /* ============================================================================
  * Matrix Operations
@@ -248,6 +251,50 @@ static int workspace_matches_block(const MambaBlock *block,
            rank > 0;
 }
 
+static int spatial_dims_product(const long *dims, long ndims,
+                                size_t *product_out) {
+    size_t product = 1;
+
+    if (!dims || !product_out || ndims <= 0 || ndims > KMAMBA_MAX_NDIMS) return 0;
+
+    for (long axis = 0; axis < ndims; axis++) {
+        size_t axis_extent;
+
+        if (dims[axis] <= 0) return 0;
+        axis_extent = (size_t)dims[axis];
+        if (product > ((size_t)-1) / axis_extent) return 0;
+        product *= axis_extent;
+    }
+
+    *product_out = product;
+    return 1;
+}
+
+static int normalize_spatial_topology(MBConfig *cfg) {
+    size_t total_points;
+
+    if (!cfg) return -1;
+
+    if (cfg->spatial_ndims <= 0) {
+        memset(cfg->spatial_dims, 0, sizeof(cfg->spatial_dims));
+        cfg->spatial_ndims = 1;
+        cfg->spatial_dims[0] = (long)cfg->seq_len;
+    }
+
+    if (cfg->spatial_ndims > KMAMBA_MAX_NDIMS) return -1;
+    if (!wavefront_nd_validate_dims(cfg->spatial_dims, cfg->spatial_ndims)) return -1;
+    if (!spatial_dims_product(cfg->spatial_dims, cfg->spatial_ndims, &total_points)) return -1;
+    if (total_points != cfg->seq_len) return -1;
+
+    if (cfg->use_convnd) {
+        if (cfg->convnd_K <= 0) return -1;
+        if (cfg->convnd_ndims <= 0) cfg->convnd_ndims = cfg->spatial_ndims;
+        if (cfg->convnd_ndims != cfg->spatial_ndims) return -1;
+    }
+
+    return 0;
+}
+
 /* ============================================================================
  * Discretization Functions
  * ============================================================================ */
@@ -336,30 +383,34 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
     block->config = *config;
     /* Ensure mimo_rank is at least 1 */
     if (block->config.mimo_rank == 0) block->config.mimo_rank = 1;
+    if (normalize_spatial_topology(&block->config) != 0) {
+        mamba_block_free(block);
+        return NULL;
+    }
 
     size_t R = _mimo_R(&block->config);
-    size_t N = config->state_size;
+    size_t N = block->config.state_size;
 
-    if (matrix_init_owned(&block->W_in, R, config->dim) != 0 ||
-        matrix_init_owned(&block->W_out, config->dim, R) != 0 ||
+    if (matrix_init_owned(&block->W_in, R, block->config.dim) != 0 ||
+        matrix_init_owned(&block->W_out, block->config.dim, R) != 0 ||
         matrix_init_owned(&block->A_log, N, 1) != 0 ||
-        matrix_init_owned(&block->W_B, N * R, config->dim) != 0 ||
-        matrix_init_owned(&block->W_C, N * R, config->dim) != 0 ||
-        matrix_init_owned(&block->delta_proj, 1, config->dim) != 0 ||
-        matrix_init_owned(&block->lambda_proj, 1, config->dim) != 0) {
+        matrix_init_owned(&block->W_B, N * R, block->config.dim) != 0 ||
+        matrix_init_owned(&block->W_C, N * R, block->config.dim) != 0 ||
+        matrix_init_owned(&block->delta_proj, 1, block->config.dim) != 0 ||
+        matrix_init_owned(&block->lambda_proj, 1, block->config.dim) != 0) {
         mamba_block_free(block);
         return NULL;
     }
     /* BCNorm biases — init séparé pour clarté */
-    block->b_B = (float *)calloc(config->state_size, sizeof(float));
-    block->b_C = (float *)calloc(config->state_size, sizeof(float));
+    block->b_B = (float *)calloc(block->config.state_size * R, sizeof(float));
+    block->b_C = (float *)calloc(block->config.state_size * R, sizeof(float));
     if (!block->b_B || !block->b_C) {
         mamba_block_free(block);
         return NULL;
     }
 
     /* Complex SSM rotation angles theta [state_size/2] */
-    size_t theta_size = config->state_size / 2;
+    size_t theta_size = block->config.state_size / 2;
     if (theta_size == 0) theta_size = 1;  /* guard for tiny state_size */
     block->theta = (float *)calloc(theta_size, sizeof(float));
     if (!block->theta) {
@@ -368,39 +419,42 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
     }
 
     block->hidden = (float *)calloc(N, sizeof(float));
-    block->delta  = (float *)calloc(config->seq_len, sizeof(float));
+    block->delta  = (float *)calloc(block->config.seq_len, sizeof(float));
 
     /* scan_B/scan_C: [L x N*R] for MIMO (R=1 → identical to previous) */
-    size_t LNR = config->seq_len * N * R;
-    size_t LD  = config->seq_len * N;
+    size_t LNR = block->config.seq_len * N * R;
+    size_t LD  = block->config.seq_len * N;
     block->scan_B     = (float *)malloc(LNR * sizeof(float));
     block->scan_C     = (float *)malloc(LNR * sizeof(float));
     block->scan_delta = (float *)malloc(LD  * sizeof(float));
     block->scan_h     = (float *)calloc(N, sizeof(float));
+    block->wavefront_plan = km_wavefront_plan_create(block->config.spatial_dims,
+                                                     block->config.spatial_ndims);
 
     if (!block->W_in.data || !block->W_out.data || !block->A_log.data ||
         !block->W_B.data || !block->W_C.data || !block->delta_proj.data ||
         !block->hidden || !block->delta ||
-        !block->scan_B || !block->scan_C || !block->scan_delta || !block->scan_h) {
+        !block->scan_B || !block->scan_C || !block->scan_delta || !block->scan_h ||
+        !block->wavefront_plan) {
         mamba_block_free(block);
         return NULL;
     }
 
     /* Allocate ConvND resources if enabled */
-    if (config->use_convnd && config->convnd_K > 0 && config->convnd_ndims > 0) {
-        long kernel_size = config->convnd_ndims * config->convnd_K * config->dim;
+    if (block->config.use_convnd &&
+        block->config.convnd_K > 0 &&
+        block->config.convnd_ndims > 0) {
+        long kernel_size = block->config.convnd_ndims *
+                           block->config.convnd_K *
+                           (long)block->config.dim;
         block->convnd_kernel = (float *)calloc(kernel_size, sizeof(float));
-        block->convnd_bias = (float *)calloc(config->dim, sizeof(float));
-        
-        ConvNDParams p = {
-            .dims = NULL,  /* Will be set per forward call */
-            .ndims = config->convnd_ndims,
-            .D = config->dim,
-            .K = config->convnd_K
-        };
-        block->convnd_ws = convnd_workspace_create(&p);
-        
-        if (!block->convnd_kernel || !block->convnd_bias || !block->convnd_ws) {
+        block->convnd_bias = (float *)calloc(block->config.dim, sizeof(float));
+
+        /* The workspace size depends on the concrete ND shape, which is not
+         * known at block creation time. Allocate it lazily at call site. */
+        block->convnd_ws = NULL;
+
+        if (!block->convnd_kernel || !block->convnd_bias) {
             mamba_block_free(block);
             return NULL;
         }
@@ -428,6 +482,7 @@ void mamba_block_free(MambaBlock *block) {
     if (block->scan_C)     free(block->scan_C);
     if (block->scan_delta) free(block->scan_delta);
     if (block->scan_h)     free(block->scan_h);
+    if (block->wavefront_plan) km_wavefront_plan_free(block->wavefront_plan);
     
     /* Free ConvND resources */
     if (block->convnd_kernel) free(block->convnd_kernel);
@@ -506,8 +561,11 @@ void mamba_block_init(MambaBlock *block) {
         }
     }
     /* BCNorm biases — initialisés à zéro (comportement neutre au départ) */
-    memset(block->b_B, 0, block->config.state_size * sizeof(float));
-    memset(block->b_C, 0, block->config.state_size * sizeof(float));
+    {
+        size_t R_init = _mimo_R(&block->config);
+        memset(block->b_B, 0, block->config.state_size * R_init * sizeof(float));
+        memset(block->b_C, 0, block->config.state_size * R_init * sizeof(float));
+    }
 
     /* Complex SSM rotation angles — small init ~2π/state_size */
     {

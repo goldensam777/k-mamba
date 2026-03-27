@@ -243,6 +243,71 @@ static int test_scannd_dispatch_matches_ref_2d(void) {
     return ok;
 }
 
+static int test_scannd_ref_with_plan_matches_plain_ref(void) {
+    const long dims[3] = {2, 2, 2};
+    float x[8];
+    float A[3] = {0.f, 0.f, 0.f};
+    float B[8];
+    float C[8];
+    float delta[24];
+    float h_ref[8] = {0.f};
+    float y_ref[8] = {0.f};
+    float h_plan[8] = {0.f};
+    float y_plan[8] = {0.f};
+    ScanNDParams p_ref;
+    ScanNDParams p_plan;
+    KMWavefrontPlan *plan;
+    int ok = 1;
+
+    for (int i = 0; i < 8; i++) {
+        x[i] = (float)(i + 1);
+        B[i] = 1.f;
+        C[i] = 1.f;
+    }
+    for (int i = 0; i < 24; i++) delta[i] = 1.f;
+
+    p_ref.dims = dims;
+    p_ref.ndims = 3;
+    p_ref.D = 1;
+    p_ref.M = 1;
+    p_ref.x = x;
+    p_ref.A = A;
+    p_ref.B = B;
+    p_ref.C = C;
+    p_ref.delta = delta;
+    p_ref.h = h_ref;
+    p_ref.y = y_ref;
+
+    p_plan = p_ref;
+    p_plan.h = h_plan;
+    p_plan.y = y_plan;
+
+    printf("\n--- scannd_ref_with_plan() vs scannd_ref() ---\n");
+
+    plan = km_wavefront_plan_create(dims, 3);
+    if (!plan) {
+        printf("%s création du plan wavefront\n", FAIL_TAG);
+        return 0;
+    }
+
+    if (scannd_ref(&p_ref) != 0 || scannd_ref_with_plan(&p_plan, plan) != 0) {
+        printf("%s échec exécution scannd_ref_with_plan\n", FAIL_TAG);
+        km_wavefront_plan_free(plan);
+        return 0;
+    }
+
+    for (int i = 0; i < 8; i++) {
+        if (!nearly_equal(y_ref[i], y_plan[i], 1e-5f)) {
+            printf("%s y[%d] ref=%.6f plan=%.6f\n", FAIL_TAG, i, y_ref[i], y_plan[i]);
+            ok = 0;
+        }
+    }
+
+    if (ok) printf("%s plan wavefront partagé cohérent pour scanND\n", PASS_TAG);
+    km_wavefront_plan_free(plan);
+    return ok;
+}
+
 int main(void) {
     int passed = 0;
     int total = 0;
@@ -254,6 +319,7 @@ int main(void) {
     total++; passed += test_scannd_ref_matches_expected_3d();
     total++; passed += test_scannd_dispatch_matches_ref_1d();
     total++; passed += test_scannd_dispatch_matches_ref_2d();
+    total++; passed += test_scannd_ref_with_plan_matches_plain_ref();
 
     printf("\n=== Résultat: %d/%d tests passent ===\n", passed, total);
     return (passed == total) ? 0 : 1;

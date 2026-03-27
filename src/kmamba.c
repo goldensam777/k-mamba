@@ -75,6 +75,40 @@ static double sum_squares_f32(const float *x, size_t n) {
     return acc;
 }
 
+static int normalize_model_topology(KMambaConfig *cfg) {
+    size_t total_points = 1;
+
+    if (!cfg) return -1;
+
+    if (cfg->spatial_ndims <= 0) {
+        memset(cfg->spatial_dims, 0, sizeof(cfg->spatial_dims));
+        cfg->spatial_ndims = 1;
+        cfg->spatial_dims[0] = (long)cfg->seq_len;
+    }
+
+    if (cfg->spatial_ndims > KMAMBA_MAX_NDIMS) return -1;
+    if (!wavefront_nd_validate_dims(cfg->spatial_dims, cfg->spatial_ndims)) return -1;
+
+    for (long axis = 0; axis < cfg->spatial_ndims; axis++) {
+        size_t axis_extent;
+
+        if (cfg->spatial_dims[axis] <= 0) return -1;
+        axis_extent = (size_t)cfg->spatial_dims[axis];
+        if (total_points > ((size_t)-1) / axis_extent) return -1;
+        total_points *= axis_extent;
+    }
+
+    if (total_points != cfg->seq_len) return -1;
+
+    if (cfg->use_convnd) {
+        if (cfg->convnd_K <= 0) return -1;
+        if (cfg->convnd_ndims <= 0) cfg->convnd_ndims = cfg->spatial_ndims;
+        if (cfg->convnd_ndims != cfg->spatial_ndims) return -1;
+    }
+
+    return 0;
+}
+
 /* ========= embedding ========= */
 
 static void embed_lookup(const KMamba *m, float *out, const uint8_t *tokens) {
@@ -91,21 +125,30 @@ KMamba* kmamba_create(const KMambaConfig *cfg) {
 
     KMamba *m = (KMamba *)xcalloc(1, sizeof(KMamba));
     m->cfg = *cfg;
+    if (normalize_model_topology(&m->cfg) != 0) {
+        free(m);
+        return NULL;
+    }
 
-    m->embedding = (float *)xcalloc(cfg->vocab_size * cfg->dim, sizeof(float));
-    m->head      = (float *)xcalloc(cfg->dim * cfg->vocab_size, sizeof(float));
+    m->embedding = (float *)xcalloc(m->cfg.vocab_size * m->cfg.dim, sizeof(float));
+    m->head      = (float *)xcalloc(m->cfg.dim * m->cfg.vocab_size, sizeof(float));
 
-    m->layers = (MambaBlock **)xcalloc(cfg->n_layers, sizeof(MambaBlock *));
-    for (size_t i = 0; i < cfg->n_layers; i++) {
+    m->layers = (MambaBlock **)xcalloc(m->cfg.n_layers, sizeof(MambaBlock *));
+    for (size_t i = 0; i < m->cfg.n_layers; i++) {
         MBConfig bc = {
-            .dim        = cfg->dim,
-            .state_size = cfg->state_size,
-            .seq_len    = cfg->seq_len,
-            .mimo_rank  = cfg->mimo_rank > 0 ? cfg->mimo_rank : 1,
-            .dt_scale   = cfg->dt_scale,
-            .dt_min     = cfg->dt_min,
-            .dt_max     = cfg->dt_max
+            .dim          = m->cfg.dim,
+            .state_size   = m->cfg.state_size,
+            .seq_len      = m->cfg.seq_len,
+            .mimo_rank    = m->cfg.mimo_rank > 0 ? m->cfg.mimo_rank : 1,
+            .dt_scale     = m->cfg.dt_scale,
+            .dt_min       = m->cfg.dt_min,
+            .dt_max       = m->cfg.dt_max,
+            .spatial_ndims= m->cfg.spatial_ndims,
+            .use_convnd   = m->cfg.use_convnd,
+            .convnd_K     = m->cfg.convnd_K,
+            .convnd_ndims = m->cfg.convnd_ndims
         };
+        memcpy(bc.spatial_dims, m->cfg.spatial_dims, sizeof(bc.spatial_dims));
         m->layers[i] = mamba_block_create(&bc);
         if (!m->layers[i]) { kmamba_free(m); return NULL; }
     }
