@@ -13,8 +13,8 @@ Le niveau wavefront ND, défini par `l(n) = Σ n_i`, constitue l'ordonnancement 
 **Pilier II : Unification des opérateurs via le squelette topologique**
 
 ScanND (récurrence d'état avec mémoire longue) et ConvND (convolution locale à noyau dense) partagent le même squelette d'exécution wavefront. Seul le calcul élémentaire par position diffère :
-- ScanND : `h(n) = Σ A_k · h(n-e_k) + B(n)·x(n)`
-- ConvND : `z(n) = Σ K(r)·x(n-r)` pour `r ∈ [0,K-1]^N`
+- ScanND : $h(n) = Σ A_k · h(n-e_k) + B(n)·x(n)$
+- ConvND : $z(n) = Σ K(r)·x(n-r)` pour `r ∈ [0,K-1]^N$
 
 Cette unification révèle que la complexité algorithmique réside dans la topologie d'ordonnancement, non dans le calcul local.
 
