@@ -12,9 +12,8 @@
 
 static void *xcalloc(size_t n, size_t sz) {
     size_t total = n * sz;
-    float *p = om_malloc(total / sizeof(float) + (total % sizeof(float) ? 1 : 0));
+    void *p = calloc(1, total);
     if (!p) { fprintf(stderr, "OOM\n"); abort(); }
-    memset(p, 0, total);
     return p;
 }
 
@@ -28,38 +27,47 @@ static void xavier_uniform(float *w, size_t fan_in, size_t fan_out, size_t n) {
         w[i] = (frand_uniform() * 2.0f - 1.0f) * scale;
 }
 
-static int normalize_model_topology(KMambaConfig *cfg) {
-    size_t total_points = 1;
-
-    if (!cfg) return -1;
-
-    if (cfg->spatial_ndims <= 0) {
-        memset(cfg->spatial_dims, 0, sizeof(cfg->spatial_dims));
-        cfg->spatial_ndims = 1;
-        cfg->spatial_dims[0] = (long)cfg->seq_len;
+/* Softmax inline: probs[i] = exp(x[i]) / sum(exp(x)) */
+static inline void softmax_f32(const float *x, float *probs, int rows, int cols) {
+    (void)rows;
+    float max_val = x[0];
+    for (int i = 1; i < cols; i++) if (x[i] > max_val) max_val = x[i];
+    float sum = 0.0f;
+    for (int i = 0; i < cols; i++) {
+        probs[i] = expf(x[i] - max_val);
+        sum += probs[i];
     }
+    float inv_sum = 1.0f / sum;
+    for (int i = 0; i < cols; i++) probs[i] *= inv_sum;
+}
 
-    if (cfg->spatial_ndims > KMAMBA_MAX_NDIMS) return -1;
-    if (!wavefront_nd_validate_dims(cfg->spatial_dims, cfg->spatial_ndims)) return -1;
-
-    for (long axis = 0; axis < cfg->spatial_ndims; axis++) {
-        size_t axis_extent;
-
-        if (cfg->spatial_dims[axis] <= 0) return -1;
-        axis_extent = (size_t)cfg->spatial_dims[axis];
-        if (total_points > ((size_t)-1) / axis_extent) return -1;
-        total_points *= axis_extent;
+/* GEMM variants for backward pass */
+static inline void gemm_f32_ABt(const float *A, const float *B, float *C,
+                                 int M, int N, int K) {
+    /* C[M,N] = A[M,K] @ B^T[N,K] (B is [N,K], we use it transposed) */
+    for (int i = 0; i < M; i++) {
+        for (int j = 0; j < N; j++) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; k++) {
+                sum += A[i * K + k] * B[j * K + k];
+            }
+            C[i * N + j] = sum;
+        }
     }
+}
 
-    if (total_points != cfg->seq_len) return -1;
-
-    if (cfg->use_convnd) {
-        if (cfg->convnd_K <= 0) return -1;
-        if (cfg->convnd_ndims <= 0) cfg->convnd_ndims = cfg->spatial_ndims;
-        if (cfg->convnd_ndims != cfg->spatial_ndims) return -1;
+static inline void gemm_f32_AtB(const float *A, const float *B, float *C,
+                                 int M, int N, int K) {
+    /* C[M,N] = A^T[M,K] @ B[K,N] (A is [K,M], we use it transposed) */
+    for (int i = 0; i < M; i++) {
+        for (int j = 0; j < N; j++) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; k++) {
+                sum += A[k * M + i] * B[k * N + j];
+            }
+            C[i * N + j] = sum;
+        }
     }
-
-    return 0;
 }
 
 /* ========= embedding ========= */
@@ -76,13 +84,18 @@ KMamba* kmamba_create(const KMambaConfig *cfg) {
     if (!cfg || !cfg->vocab_size || !cfg->dim || !cfg->seq_len || !cfg->n_layers)
         return NULL;
 
-    om_init(OM_BACKEND_AUTO);
+    
 
     KMamba *m = (KMamba *)calloc(1, sizeof(KMamba));
     if (!m) return NULL;
 
     m->cfg = *cfg;
-    if (normalize_model_topology(&m->cfg) != 0) {
+    if (km_normalize_spatial_topology(&m->cfg.spatial_ndims,
+                                      m->cfg.spatial_dims,
+                                      m->cfg.seq_len,
+                                      m->cfg.use_convnd,
+                                      &m->cfg.convnd_ndims,
+                                      m->cfg.convnd_K) != 0) {
         free(m);
         return NULL;
     }
@@ -124,12 +137,12 @@ void kmamba_free(KMamba *m) {
         }
         free(m->layers);
     }
-    om_free(m->embedding);
-    om_free(m->head);
-    om_free(m->m_embedding);
-    om_free(m->v_embedding);
-    om_free(m->m_head);
-    om_free(m->v_head);
+    free(m->embedding);
+    free(m->head);
+    free(m->m_embedding);
+    free(m->v_embedding);
+    free(m->m_head);
+    free(m->v_head);
     free(m);
 }
 
@@ -321,10 +334,10 @@ int kmamba_forward(KMamba *m, const uint8_t *tokens, float *logits_out) {
         const float *tmp = cur; cur = next; next = (float *)tmp;
     }
 
-    om_gemm(cur, m->head, logits_out, (int)L, (int)D, (int)m->cfg.vocab_size);
+    gemm_f32(cur, m->head, logits_out, (int)L, (int)D, (int)m->cfg.vocab_size);
 
-    om_free(buf0);
-    om_free(buf1);
+    free(buf0);
+    free(buf1);
     return 0;
 }
 
@@ -353,12 +366,12 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
         mamba_block_forward(m->layers[i], &acts[(i + 1) * L * D], &acts[i * L * D], 1);
 
     const float *hidden = &acts[m->cfg.n_layers * L * D];
-    om_gemm(hidden, m->head, logits, (int)L, (int)D, (int)V);
+    gemm_f32(hidden, m->head, logits, (int)L, (int)D, (int)V);
 
     float loss = 0.0f;
     float invL = 1.0f / (float)L;
     for (size_t t = 0; t < L; t++) {
-        om_softmax(&logits[t * V], probs, 1, (int)V);
+        softmax_f32(&logits[t * V], probs, 1, (int)V);
         float p = probs[(size_t)tokens_tgt[t]];
         if (p < 1e-20f) p = 1e-20f;
         loss += -logf(p);
@@ -370,12 +383,12 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
     loss *= invL;
 
     /* d_hidden = dlogits @ head */
-    om_gemm(dlogits, m->head, d_hidden, (int)L, (int)V, (int)D); /* This needs to be checked, head is [D, V] */
+    gemm_f32(dlogits, m->head, d_hidden, (int)L, (int)V, (int)D); /* This needs to be checked, head is [D, V] */
     /* Re-check: dlogits [L, V], head [D, V]. We want dlogits [L, V] @ head^T [V, D] = [L, D] */
-    om_gemm_ABt(dlogits, m->head, d_hidden, (int)L, (int)D, (int)V);
+    gemm_f32_ABt(dlogits, m->head, d_hidden, (int)L, (int)D, (int)V);
 
     /* g_head = hidden^T @ dlogits = [D, L] @ [L, V] = [D, V] */
-    om_gemm_AtB(hidden, dlogits, g_head, (int)D, (int)V, (int)L);
+    gemm_f32_AtB(hidden, dlogits, g_head, (int)D, (int)V, (int)L);
 
     for (size_t i = 0; i < m->cfg.n_layers; i++) mamba_zero_grads(m->layers[i]);
 
@@ -395,8 +408,8 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
     }
 
     {
-        float gn_h = om_norm_l2(g_head, (int)(D * V));
-        float gn_e = om_norm_l2(g_embed, (int)(V * D));
+        float gn_h = gradient_norm_f32(g_head, (int)(D * V));
+        float gn_e = gradient_norm_f32(g_embed, (int)(V * D));
         double grad_sq = (double)gn_h * gn_h + (double)gn_e * gn_e;
         for (size_t i = 0; i < m->cfg.n_layers; i++)
             grad_sq += (double)mamba_block_grad_sqnorm(m->layers[i]);
@@ -412,11 +425,11 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
         mamba_optimizer_step(m->layers[i], &m->opt_blocks);
 
     m->step_embed_head++;
-    om_adamw_update(m->embedding, g_embed, m->m_embedding, m->v_embedding, V * D, &m->opt_blocks, m->step_embed_head);
-    om_adamw_update(m->head,      g_head,  m->m_head,      m->v_head,      D * V, &m->opt_blocks, m->step_embed_head);
+    adamw_step_f32(m->embedding, g_embed, m->m_embedding, m->v_embedding, m->opt_blocks.lr, 0.9f, 0.999f, m->opt_blocks.eps, m->opt_blocks.weight_decay, V * D, m->step_embed_head);
+    adamw_step_f32(m->head,      g_head,  m->m_head,      m->v_head,      m->opt_blocks.lr, 0.9f, 0.999f, m->opt_blocks.eps, m->opt_blocks.weight_decay, D * V, m->step_embed_head);
 
-    om_free(acts); om_free(d_hidden); om_free(logits); om_free(probs);
-    om_free(dlogits); om_free(g_head); om_free(g_embed); om_free(d_buf);
+    free(acts); free(d_hidden); free(logits); free(probs);
+    free(dlogits); free(g_head); free(g_embed); free(d_buf);
 
     return loss;
 }
@@ -497,11 +510,11 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
             }
 
             const float *hidden = &acts[n_layers * L * D];
-            om_gemm(hidden, m->head, logits, (int)L, (int)D, (int)V);
+            gemm_f32(hidden, m->head, logits, (int)L, (int)D, (int)V);
 
             float sample_loss = 0.0f;
             for (size_t t = 0; t < L; t++) {
-                om_softmax(&logits[t * V], probs, 1, (int)V);
+                softmax_f32(&logits[t * V], probs, 1, (int)V);
                 float p = probs[(size_t)tok_tgt[t]];
                 if (p < 1e-20f) p = 1e-20f;
                 sample_loss += -logf(p);
@@ -512,10 +525,10 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
             total_loss += sample_loss * invL;
 
             /* d_hidden = dlogits [L, V] @ head^T [V, D] = [L, D] */
-            om_gemm_ABt(dlogits, m->head, d_hidden, (int)L, (int)D, (int)V);
+            gemm_f32_ABt(dlogits, m->head, d_hidden, (int)L, (int)D, (int)V);
 
             /* my_g_head = hidden^T [D, L] @ dlogits [L, V] = [D, V] */
-            om_gemm_AtB(hidden, dlogits, my_g_head, (int)D, (int)V, (int)L);
+            gemm_f32_AtB(hidden, dlogits, my_g_head, (int)D, (int)V, (int)L);
 
             float *dcur  = d_hidden;
             float *dnext = d_buf;
@@ -534,8 +547,8 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
             }
         }
 
-        om_free(acts); om_free(logits); om_free(probs); om_free(dlogits);
-        om_free(d_hidden); om_free(d_buf);
+        free(acts); free(logits); free(probs); free(dlogits);
+        free(d_hidden); free(d_buf);
     }
 
     for (int t = 0; t < n_threads; t++) {
@@ -548,8 +561,8 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
         }
         free(thread_local_grads[t]);
         free(thread_ws[t]);
-        om_free(thread_g_head[t]);
-        om_free(thread_g_embed[t]);
+        free(thread_g_head[t]);
+        free(thread_g_embed[t]);
     }
     free(thread_local_grads);
     free(thread_ws);
@@ -557,8 +570,8 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
     free(thread_g_embed);
 
     {
-        float gn_h = om_norm_l2(g_head, (int)(D * V));
-        float gn_e = om_norm_l2(g_embed, (int)(V * D));
+        float gn_h = gradient_norm_f32(g_head, (int)(D * V));
+        float gn_e = gradient_norm_f32(g_embed, (int)(V * D));
         double grad_sq = (double)gn_h * gn_h + (double)gn_e * gn_e;
         for (size_t i = 0; i < n_layers; i++)
             grad_sq += (double)mamba_block_grad_sqnorm(m->layers[i]);
@@ -574,10 +587,10 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
         mamba_optimizer_step(m->layers[i], &m->opt_blocks);
 
     m->step_embed_head++;
-    om_adamw_update(m->embedding, g_embed, m->m_embedding, m->v_embedding, V * D, &m->opt_blocks, m->step_embed_head);
-    om_adamw_update(m->head,      g_head,  m->m_head,      m->v_head,      D * V, &m->opt_blocks, m->step_embed_head);
+    adamw_step_f32(m->embedding, g_embed, m->m_embedding, m->v_embedding, m->opt_blocks.lr, 0.9f, 0.999f, m->opt_blocks.eps, m->opt_blocks.weight_decay, V * D, m->step_embed_head);
+    adamw_step_f32(m->head,      g_head,  m->m_head,      m->v_head,      m->opt_blocks.lr, 0.9f, 0.999f, m->opt_blocks.eps, m->opt_blocks.weight_decay, D * V, m->step_embed_head);
 
-    om_free(g_head); om_free(g_embed);
+    free(g_head); free(g_embed);
 
     return total_loss * invB;
 }

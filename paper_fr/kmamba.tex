@@ -39,7 +39,7 @@ avec parallélisme par front d'onde et scan CUDA à l'échelle industrielle}}
 
 \author{
   YEVI Mawuli Peniel Samuel\\
-  \textit{Génie des Systèmes et IoT, IFRI--UAC, Bénin}\\
+  \textit{Ingénieur en Systèmes Embarqués et IoT, IFRI-UAC, Bénin}\\
   \texttt{goldensam777@github}
 }
 
@@ -63,6 +63,10 @@ position dépend des $N$ prédécesseurs au même pas de temps.
 Pour des entrées 2D, nous prouvons que l'ordonnancement par front d'onde
 (anti-diagonales) expose un parallélisme $\Theta(d)$ sur une grille $d \times d$ —
 ce qui correspond exactement à l'accélération mesurée de $32\times$ pour $d = 64$.
+Nous introduisons une \emph{couche topologique ND réutilisable} qui élimine la
+duplication de code entre les opérateurs de scan et de convolution en fournissant
+des primitives communes pour l'indexation ND, le calcul des strides et la
+génération de front d'onde.
 Pour le déploiement sur GPU, nous implémentons le scan parallèle préfixé de
 Blelloch~\cite{blelloch1990} sur le monoïde du SSM, réduisant la profondeur de
 calcul de $O(L)$ à $O(\log L)$ avec un travail $O(L)$, permettant une réduction
@@ -108,6 +112,9 @@ une bibliothèque C/ASM/CUDA entièrement autonome avec des noyaux AVX2 écrits 
         avec analyse formelle des dépendances (Section~\ref{sec:theory}).
   \item \textbf{Théorème du front d'onde} : preuve et validation expérimentale
         du parallélisme $\Theta(d)$ pour les grilles $d \times d$ (Section~\ref{sec:wavefront}).
+  \item \textbf{Couche topologique ND} : primitives réutilisables pour l'indexation ND,
+        le calcul des strides et la génération de front d'onde, partagées entre
+        \texttt{scan\_nd} et \texttt{convnd} (Section~\ref{sec:implementation}).
   \item \textbf{Scan CUDA industriel} : scan préfixé de Blelloch adapté
         au monoïde non commutatif du SSM, profondeur $O(\log L)$
         (Section~\ref{sec:blelloch}).
@@ -367,6 +374,32 @@ Cette séparation garantit que changer le backend de calcul (par ex., portage
 sur ARM NEON ou AVX-512) ne nécessite de modifier que \texttt{optimatrix},
 laissant la logique du modèle intacte.
 
+\subsection{Couche Topologique ND}
+
+Une contribution architecturale clé est la séparation des opérations
+\emph{topologiques} des opérations \emph{computationnelles}. La couche
+topologique ND (\texttt{km\_topology.h/c}) fournit :
+
+\begin{itemize}
+  \item \textbf{Normalisation} : \texttt{km\_normalize\_spatial\_topology()} valide et
+canonicalise les formes de dimensions arbitraires.
+  \item \textbf{Indexation} : \texttt{km\_make\_row\_major\_strides()},
+\texttt{km\_unravel\_index()}, \texttt{km\_ravel\_index()} pour la conversion de
+coordonnées ND en O(1).
+  \item \textbf{Génération de front d'onde} : \texttt{wavefront\_nd\_for\_level()}
+énumère toutes les positions au niveau $k$ du front d'où $\sum_i \text{idx}[i] = k$.
+  \item \textbf{Plans réutilisables} : \texttt{KMWavefrontPlan} pré-calcule et met
+en cache les offsets row-major par niveau, permettant un accès O(1) aux niveaux
+pendant les opérations de scan/conv.
+\end{itemize}
+
+Cette couche élimine la duplication de code entre \texttt{scan\_nd.c} et
+\texttt{convnd.c}, qui implémentaient auparavant leurs propres helpers de
+stride/index. Les deux partagent maintenant les mêmes primitives topologiques
+tout en conservant leurs sémantiques computationnelles distinctes (monoïde SSM
+vs.
+noyau de convolution).
+
 \subsection{Noyau GEMM AVX2}
 
 Le noyau GEMM (\texttt{gemm\_avx2.asm}) utilise une stratégie de produit
@@ -571,11 +604,13 @@ Le modèle roofline~\cite{williams2009roofline} guide notre classification des n
 \section{Conclusion}
 
 Nous avons présenté K-Mamba, une bibliothèque SSM Mamba $N$-dimensionnelle native
-avec trois contributions clés : (1) une preuve formelle que l'ordonnancement
+avec quatre contributions clés : (1) une preuve formelle que l'ordonnancement
 par front d'onde sur grille $d \times d$ atteint une accélération $d/2$,
-validée expérimentalement à 0,1\% près ; (2) un scan préfixé parallèle de Blelloch
-réduisant la profondeur CUDA du SSM de $O(L)$ à $O(\log L)$ avec le même travail ;
-(3) une implémentation C/ASM/CUDA sans dépendance de la pile d'entraînement complète,
+validée expérimentalement à 0,1\% près ; (2) une couche topologique ND réutilisable
+éliminant la duplication de code entre les opérateurs de scan et de convolution ;
+(3) un scan préfixé parallèle de Blelloch réduisant la profondeur CUDA du SSM
+de $O(L)$ à $O(\log L)$ avec le même travail ;
+(4) une implémentation C/ASM/CUDA sans dépendance de la pile d'entraînement complète,
 incluant l'optimiseur MUONCLIP, le tout sans Python ni bibliothèques ML externes.
 
 K-Mamba démontre que l'inférence et l'entraînement de SSM de qualité industrielle

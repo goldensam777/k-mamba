@@ -56,14 +56,17 @@ sequential 1D scans~\cite{vmamba,mamband},
 K-Mamba defines a \emph{simultaneous} $N$-dimensional SSM recurrence where
 each position depends on $N$ predecessors at the same time step.
 For 2D inputs, we prove that wavefront anti-diagonal scheduling exposes
-$\Theta(d)$ parallelism on a $d \times d$ grid — exactly matching our
+$\Theta(d)$ parallelism on a $d \times d$ grid --- exactly matching our
 measured speedup of $32\times$ at $d = 64$.
+We introduce a \emph{reusable ND topological layer} that eliminates code
+duplication between scan and convolution operators by providing common
+primitives for ND indexing, stride calculation, and wavefront generation.
 For GPU deployment, we implement the Blelloch~\cite{blelloch1990}
 parallel prefix scan over the SSM monoid, reducing computational
 depth from $O(L)$ to $O(\log L)$ with $O(L)$ work, enabling
 $790\times$ theoretical latency reduction at $L = 1024$, $D = 128$, $M = 16$.
-The entire framework — kernels, optimizer (MUONCLIP~\cite{muon2025}),
-convolution, and training loop — is implemented in
+The entire framework --- kernels, optimizer (MUONCLIP~\cite{muon2025}),
+convolution, and training loop --- is implemented in
 C, x86-64 NASM/AVX2, and CUDA with no external dependencies beyond libc and libm.
 \end{abstract}
 
@@ -103,6 +106,9 @@ and the MUONCLIP optimizer~\cite{muon2025} — all without Python or PyTorch.
         with formal dependency analysis (Section~\ref{sec:theory}).
   \item \textbf{Wavefront theorem}: proof and experimental validation of
         $\Theta(d)$ parallelism for $d \times d$ grids (Section~\ref{sec:wavefront}).
+  \item \textbf{ND topological layer}: reusable primitives for ND indexing,
+        stride calculation, and wavefront generation shared across
+        \texttt{scan\_nd} and \texttt{convnd} (Section~\ref{sec:implementation}).
   \item \textbf{Industrial CUDA scan}: Blelloch prefix scan adapted
         to the SSM non-commutative monoid, $O(\log L)$ depth
         (Section~\ref{sec:blelloch}).
@@ -361,6 +367,20 @@ This separation ensures that changing the compute backend
 (e.g., porting to ARM NEON or AVX-512) requires only modifying
 \texttt{optimatrix}, leaving model logic untouched.
 
+\subsection{ND Topological Layer}
+
+A key architectural contribution is the separation of \emph{topological} operations from \emph{computational} ones. The ND topological layer (\texttt{km\_topology.h/c}) provides:
+
+\begin{itemize}
+  \item \textbf{Normalization}: \texttt{km\_normalize\_spatial\_topology()} validates and canonicalizes arbitrary dimension shapes.
+  \item \textbf{Indexing}: \texttt{km\_make\_row\_major\_strides()}, \texttt{km\_unravel\_index()}, \texttt{km\_ravel\_index()} for O(1) ND coordinate conversion.
+  \item \textbf{Wavefront generation}: \texttt{wavefront\_nd\_for\_level()} enumerates all positions at wavefront level $k$ where $\sum_i \text{idx}[i] = k$.
+  \item \textbf{Reusable plans}: \texttt{KMWavefrontPlan} pre-computes and caches row-major offsets per level, enabling O(1) level access during scan/conv operations.
+\end{itemize}
+
+This layer eliminates code duplication between \texttt{scan\_nd.c} and \texttt{convnd.c}, which previously implemented their own stride/index helpers. Both now share the same topological primitives while retaining their distinct computational semantics (SSM monoid vs.
+convolution kernel).
+
 \subsection{AVX2 GEMM Kernel}
 
 The GEMM kernel (\texttt{gemm\_avx2.asm}) uses an outer-product strategy:
@@ -563,12 +583,14 @@ The roofline model~\cite{williams2009roofline} guides our kernel classification.
 \section{Conclusion}
 
 We presented K-Mamba, a native $N$-dimensional Mamba SSM library
-with three key contributions: (1) a formal proof that $d \times d$
+with four key contributions: (1) a formal proof that $d \times d$
 wavefront scheduling achieves $d/2$ speedup, experimentally validated
-to 0.1\% accuracy; (2) a Blelloch parallel prefix scan reducing
-CUDA SSM depth from $O(L)$ to $O(\log L)$ with exact same work;
-(3) a zero-dependency C/ASM/CUDA implementation of the full training stack
-including MUONCLIP optimizer, all without Python or external ML libraries.
+to 0.1\% accuracy; (2) a reusable ND topological layer eliminating code
+duplication between scan and convolution operators; (3) a Blelloch parallel
+prefix scan reducing CUDA SSM depth from $O(L)$ to $O(\log L)$ with exact
+same work; (4) a zero-dependency C/ASM/CUDA implementation of the full
+training stack including MUONCLIP optimizer, all without Python or external
+ML libraries.
 
 K-Mamba demonstrates that industrial-quality SSM inference and training
 does not require large software stacks —

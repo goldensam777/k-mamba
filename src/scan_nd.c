@@ -5,31 +5,7 @@
 
 #include "scan.h"
 #include "wavefront_plan.h"
-
-static int scannd_build_strides(const long *dims, long ndims, long *strides) {
-    long stride = 1;
-
-    if (!dims || !strides || ndims <= 0) return 0;
-
-    for (long axis = ndims - 1; axis >= 0; axis--) {
-        strides[axis] = stride;
-        stride *= dims[axis];
-    }
-
-    return 1;
-}
-
-static void scannd_offset_to_idx(long offset,
-                                 const long *dims,
-                                 const long *strides,
-                                 long ndims,
-                                 long *idx) {
-    if (!dims || !strides || !idx || ndims <= 0) return;
-
-    for (long axis = 0; axis < ndims; axis++) {
-        idx[axis] = (offset / strides[axis]) % dims[axis];
-    }
-}
+#include "km_topology.h"
 
 int scannd_validate(const ScanNDParams *p) {
     long total_points;
@@ -63,7 +39,7 @@ int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan) {
         free(idx);
         return -1;
     }
-    if (!scannd_build_strides(p->dims, p->ndims, strides)) {
+    if (!km_make_row_major_strides(p->dims, p->ndims, strides)) {
         free(strides);
         free(idx);
         return -1;
@@ -87,7 +63,7 @@ int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan) {
                 return -1;
             }
 
-            scannd_offset_to_idx(offset, p->dims, strides, p->ndims, idx);
+            km_unravel_index(offset, p->dims, strides, p->ndims, idx);
 
             for (long d = 0; d < p->D; d++) {
                 float x_val = p->x[offset * p->D + d];

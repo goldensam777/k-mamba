@@ -4,11 +4,11 @@
  * Core Mamba implementation: diagonal A, shared B/C vectors,
  * input-dependent delta, W_in/W_out projections, scan1d/scan2d ASM kernels.
  *
- * Part of k-mamba — uses optimatrix for compute kernels.
+ * Part of k-mamba — uses inline kernels (zero dependency).
  */
 
 #include "kmamba.h"
-#include "openblas_utils.h"
+#include "kmamba_kernels.h"
 #include "mamba_scan.h"
 #ifdef KMAMBA_BUILD_CUDA
 #include "mamba_scan_cuda.h"
@@ -54,12 +54,12 @@ MambaBlockWorkspace* mamba_block_workspace_create(const MambaBlock *block) {
     size_t N = block->config.state_size;
     size_t L = block->config.seq_len;
     size_t R = _mimo_R(&block->config);
-    ws->hidden = om_malloc(N);
-    ws->delta = om_malloc(L);
-    ws->scan_B = om_malloc(L * N * R);
-    ws->scan_C = om_malloc(L * N * R);
-    ws->scan_delta = om_malloc(L * N);
-    ws->scan_h = om_malloc(N);
+    ws->hidden = malloc(N);
+    ws->delta = malloc(L);
+    ws->scan_B = malloc(L * N * R);
+    ws->scan_C = malloc(L * N * R);
+    ws->scan_delta = malloc(L * N);
+    ws->scan_h = malloc(N);
     if (!ws->hidden || !ws->delta || !ws->scan_B || !ws->scan_C || !ws->scan_delta || !ws->scan_h) {
         mamba_block_workspace_free(ws);
         return NULL;
@@ -72,31 +72,30 @@ MambaBlockWorkspace* mamba_block_workspace_create(const MambaBlock *block) {
 
 void mamba_block_workspace_free(MambaBlockWorkspace *ws) {
     if (!ws) return;
-    if (ws->hidden) om_free(ws->hidden);
-    if (ws->delta) om_free(ws->delta);
-    if (ws->scan_B) om_free(ws->scan_B);
-    if (ws->scan_C) om_free(ws->scan_C);
-    if (ws->scan_delta) om_free(ws->scan_delta);
-    if (ws->scan_h) om_free(ws->scan_h);
+    if (ws->hidden) free(ws->hidden);
+    if (ws->delta) free(ws->delta);
+    if (ws->scan_B) free(ws->scan_B);
+    if (ws->scan_C) free(ws->scan_C);
+    if (ws->scan_delta) free(ws->scan_delta);
+    if (ws->scan_h) free(ws->scan_h);
     free(ws);
 }
-static int           normalize_spatial_topology(MBConfig *cfg);
 
 static void project_controller(const MambaBlock *block, const float *x_t,
                                 float *z_buf, float *u_out) {
     if (!block || !x_t || !z_buf || !u_out) return;
     size_t R = _mimo_R(&block->config);
-    om_gemv(block->W_in.data, x_t, z_buf, (int)R, (int)block->config.dim);
-    om_silu(z_buf, u_out, (int)R);
+    gemv_f32(block->W_in.data, x_t, z_buf, (int)R, (int)block->config.dim);
+    silu_f32(z_buf, u_out, (int)R);
 }
 
 static float project_delta_value(const MambaBlock *block, const float *x_t,
                                   float *tmp_delta) {
     if (!block || !x_t || !tmp_delta) return 0.0f;
     if (block->delta_proj.rows > 0) {
-        om_gemv(block->delta_proj.data, x_t, tmp_delta, 1, (int)block->config.dim);
+        gemv_f32(block->delta_proj.data, x_t, tmp_delta, 1, (int)block->config.dim);
         float dval;
-        om_softplus(tmp_delta, &dval, 1);
+        softplus_f32(tmp_delta, &dval, 1);
         if (dval < block->config.dt_min) dval = block->config.dt_min;
         if (dval > block->config.dt_max) dval = block->config.dt_max;
         return dval;
@@ -113,7 +112,7 @@ MBMatrix* mb_matrix_create(size_t rows, size_t cols) {
     if (!m) return NULL;
     m->rows = rows;
     m->cols = cols;
-    m->data = om_malloc(rows * cols);
+    m->data = malloc(rows * cols);
     if (!m->data) { free(m); return NULL; }
     memset(m->data, 0, rows * cols * sizeof(float));
     return m;
@@ -123,7 +122,7 @@ static int matrix_init_owned(MBMatrix *dst, size_t rows, size_t cols) {
     if (!dst) return -1;
     dst->rows = rows;
     dst->cols = cols;
-    dst->data = om_malloc(rows * cols);
+    dst->data = malloc(rows * cols);
     if (!dst->data) return -1;
     memset(dst->data, 0, rows * cols * sizeof(float));
     return 0;
@@ -131,7 +130,7 @@ static int matrix_init_owned(MBMatrix *dst, size_t rows, size_t cols) {
 
 void mb_matrix_free(MBMatrix *m) {
     if (!m) return;
-    if (m->data) om_free(m->data);
+    if (m->data) free(m->data);
     free(m);
 }
 
@@ -139,35 +138,6 @@ void mb_matrix_copy(MBMatrix *dst, const MBMatrix *src) {
     if (!dst || !src || !dst->data || !src->data) return;
     if (dst->rows != src->rows || dst->cols != src->cols) return;
     memcpy(dst->data, src->data, src->rows * src->cols * sizeof(float));
-}
-
-static int spatial_dims_product(const long *dims, long ndims, size_t *product_out) {
-    size_t product = 1;
-    if (!dims || !product_out || ndims <= 0 || ndims > KMAMBA_MAX_NDIMS) return 0;
-    for (long axis = 0; axis < ndims; axis++) {
-        if (dims[axis] <= 0) return 0;
-        product *= (size_t)dims[axis];
-    }
-    *product_out = product;
-    return 1;
-}
-
-static int normalize_spatial_topology(MBConfig *cfg) {
-    size_t total_points;
-    if (!cfg) return -1;
-    if (cfg->spatial_ndims <= 0) {
-        cfg->spatial_ndims = 1;
-        cfg->spatial_dims[0] = (long)cfg->seq_len;
-    }
-    if (!spatial_dims_product(cfg->spatial_dims, cfg->spatial_ndims, &total_points)) return -1;
-    if (total_points != cfg->seq_len) return -1;
-
-    if (cfg->use_convnd) {
-        if (cfg->convnd_K <= 0) return -1;
-        if (cfg->convnd_ndims <= 0) cfg->convnd_ndims = cfg->spatial_ndims;
-        if (cfg->convnd_ndims != cfg->spatial_ndims) return -1;
-    }
-    return 0;
 }
 
 /* ============================================================================
@@ -180,7 +150,15 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
     if (!block) return NULL;
     block->config = *config;
     if (block->config.mimo_rank == 0) block->config.mimo_rank = 1;
-    if (normalize_spatial_topology(&block->config) != 0) { mamba_block_free(block); return NULL; }
+    if (km_normalize_spatial_topology(&block->config.spatial_ndims,
+                                      block->config.spatial_dims,
+                                      block->config.seq_len,
+                                      block->config.use_convnd,
+                                      &block->config.convnd_ndims,
+                                      block->config.convnd_K) != 0) {
+        mamba_block_free(block);
+        return NULL;
+    }
 
     size_t R = _mimo_R(&block->config);
     size_t N = block->config.state_size;
@@ -196,15 +174,15 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
         mamba_block_free(block); return NULL;
     }
 
-    block->b_B = om_malloc(N * R);
-    block->b_C = om_malloc(N * R);
-    block->theta = om_malloc(N / 2 > 0 ? N / 2 : 1);
-    block->hidden = om_malloc(N);
-    block->delta = om_malloc(block->config.seq_len);
-    block->scan_B = om_malloc(block->config.seq_len * N * R);
-    block->scan_C = om_malloc(block->config.seq_len * N * R);
-    block->scan_delta = om_malloc(block->config.seq_len * N);
-    block->scan_h = om_malloc(N);
+    block->b_B = malloc(N * R);
+    block->b_C = malloc(N * R);
+    block->theta = malloc(N / 2 > 0 ? N / 2 : 1);
+    block->hidden = malloc(N);
+    block->delta = malloc(block->config.seq_len);
+    block->scan_B = malloc(block->config.seq_len * N * R);
+    block->scan_C = malloc(block->config.seq_len * N * R);
+    block->scan_delta = malloc(block->config.seq_len * N);
+    block->scan_h = malloc(N);
     block->wavefront_plan = km_wavefront_plan_create(block->config.spatial_dims, block->config.spatial_ndims);
 
     if (!block->b_B || !block->b_C || !block->theta || !block->hidden || !block->delta ||
@@ -217,8 +195,8 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
         if (kernel_size == 0 && block->config.spatial_ndims > 0) {
             kernel_size = block->config.spatial_ndims * block->config.convnd_K * (long)block->config.dim;
         }
-        block->convnd_kernel = om_malloc(kernel_size);
-        block->convnd_bias = om_malloc(block->config.dim);
+        block->convnd_kernel = malloc(kernel_size);
+        block->convnd_bias = malloc(block->config.dim);
         if (!block->convnd_kernel || !block->convnd_bias) {
             mamba_block_free(block); return NULL;
         }
@@ -232,26 +210,25 @@ MambaBlock* mamba_block_create(const MBConfig *config) {
 void mamba_block_free(MambaBlock *block) {
     if (!block) return;
     mamba_free_optimizer(block);
-    if (block->W_in.data) om_free(block->W_in.data);
-    if (block->W_out.data) om_free(block->W_out.data);
-    if (block->A_log.data) om_free(block->A_log.data);
-    if (block->W_B.data) om_free(block->W_B.data);
-    if (block->W_C.data) om_free(block->W_C.data);
-    if (block->delta_proj.data) om_free(block->delta_proj.data);
-    if (block->lambda_proj.data) om_free(block->lambda_proj.data);
-    if (block->b_B) om_free(block->b_B);
-    if (block->b_C) om_free(block->b_C);
-    if (block->theta) om_free(block->theta);
-    if (block->hidden) om_free(block->hidden);
-    if (block->delta) om_free(block->delta);
-    if (block->scan_B) om_free(block->scan_B);
-    if (block->scan_C) om_free(block->scan_C);
-    if (block->scan_delta) om_free(block->scan_delta);
-    if (block->scan_h) om_free(block->scan_h);
+    if (block->W_in.data) free(block->W_in.data);
+    if (block->W_out.data) free(block->W_out.data);
+    if (block->A_log.data) free(block->A_log.data);
+    if (block->W_B.data) free(block->W_B.data);
+    if (block->W_C.data) free(block->W_C.data);
+    if (block->delta_proj.data) free(block->delta_proj.data);
+    if (block->lambda_proj.data) free(block->lambda_proj.data);
+    if (block->b_B) free(block->b_B);
+    if (block->b_C) free(block->b_C);
+    if (block->theta) free(block->theta);
+    if (block->hidden) free(block->hidden);
+    if (block->delta) free(block->delta);
+    if (block->scan_B) free(block->scan_B);
+    if (block->scan_C) free(block->scan_C);
+    if (block->scan_delta) free(block->scan_delta);
+    if (block->scan_h) free(block->scan_h);
     if (block->wavefront_plan) km_wavefront_plan_free(block->wavefront_plan);
-    if (block->convnd_kernel) om_free(block->convnd_kernel);
-    if (block->convnd_bias) om_free(block->convnd_bias);
-    if (block->convnd_ws) convnd_workspace_free(block->convnd_ws);
+    if (block->convnd_kernel) free(block->convnd_kernel);
+    if (block->convnd_bias) free(block->convnd_bias);
     free(block);
 }
 
@@ -350,16 +327,16 @@ float mamba_block_grad_sqnorm(const MambaBlock *block) {
     size_t D = block->config.dim, N = block->config.state_size, R = _mimo_R(&block->config), NR = N * R;
     size_t TS = N/2 > 0 ? N/2 : 1;
     double acc = 0.0; float n;
-    n = om_norm_l2(s->g_W_in, (int)(R*D)); acc += (double)n*n;
-    n = om_norm_l2(s->g_W_out, (int)(D*R)); acc += (double)n*n;
-    n = om_norm_l2(s->g_A_log, (int)N); acc += (double)n*n;
-    n = om_norm_l2(s->g_W_B, (int)(NR*D)); acc += (double)n*n;
-    n = om_norm_l2(s->g_W_C, (int)(NR*D)); acc += (double)n*n;
-    n = om_norm_l2(s->g_b_B, (int)NR); acc += (double)n*n;
-    n = om_norm_l2(s->g_b_C, (int)NR); acc += (double)n*n;
-    n = om_norm_l2(s->g_delta_proj, (int)D); acc += (double)n*n;
-    n = om_norm_l2(s->g_lambda_proj, (int)D); acc += (double)n*n;
-    n = om_norm_l2(s->g_theta, (int)TS); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_W_in, (int)(R*D)); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_W_out, (int)(D*R)); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_A_log, (int)N); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_W_B, (int)(NR*D)); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_W_C, (int)(NR*D)); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_b_B, (int)NR); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_b_C, (int)NR); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_delta_proj, (int)D); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_lambda_proj, (int)D); acc += (double)n*n;
+    n = gradient_norm_f32(s->g_theta, (int)TS); acc += (double)n*n;
     return (float)acc;
 }
 
@@ -371,27 +348,27 @@ void mamba_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
     size_t TS = N/2 > 0 ? N/2 : 1;
     
     if (s->type == OPTIMIZER_MUON) {
-        om_muon_update_mat(block->W_in.data,  s->g_W_in,  s->m_W_in,  R,  D,  conf);
-        om_muon_update_mat(block->W_out.data, s->g_W_out, s->m_W_out, D,  R,  conf);
-        om_muon_update_vec(block->A_log.data, s->g_A_log, s->m_A_log, N,  conf);
-        om_muon_update_mat(block->W_B.data,   s->g_W_B,   s->m_W_B,   NR, D,  conf);
-        om_muon_update_mat(block->W_C.data,   s->g_W_C,   s->m_W_C,   NR, D,  conf);
-        om_muon_update_vec(block->b_B,        s->g_b_B,   s->m_b_B,   NR, conf);
-        om_muon_update_vec(block->b_C,        s->g_b_C,   s->m_b_C,   NR, conf);
-        om_muon_update_vec(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  D, conf);
-        om_muon_update_vec(block->lambda_proj.data, s->g_lambda_proj, s->m_lambda_proj, D, conf);
-        om_muon_update_vec(block->theta, s->g_theta, s->m_theta, TS, conf);
+        muon_update_mat_f32(block->W_in.data,  s->g_W_in,  s->m_W_in,  R,  D,  conf, s->step);
+        muon_update_mat_f32(block->W_out.data, s->g_W_out, s->m_W_out, D,  R,  conf, s->step);
+        muon_update_vec_f32(block->A_log.data, s->g_A_log, s->m_A_log, N,  conf, s->step);
+        muon_update_mat_f32(block->W_B.data,   s->g_W_B,   s->m_W_B,   NR, D,  conf, s->step);
+        muon_update_mat_f32(block->W_C.data,   s->g_W_C,   s->m_W_C,   NR, D,  conf, s->step);
+        muon_update_vec_f32(block->b_B,        s->g_b_B,   s->m_b_B,   NR, conf, s->step);
+        muon_update_vec_f32(block->b_C,        s->g_b_C,   s->m_b_C,   NR, conf, s->step);
+        muon_update_vec_f32(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  D, conf, s->step);
+        muon_update_vec_f32(block->lambda_proj.data, s->g_lambda_proj, s->m_lambda_proj, D, conf, s->step);
+        muon_update_vec_f32(block->theta, s->g_theta, s->m_theta, TS, conf, s->step);
     } else {
-        om_adamw_update(block->W_in.data,  s->g_W_in,  s->m_W_in,  s->v_W_in,  R * D, conf, s->step);
-        om_adamw_update(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, D * R, conf, s->step);
-        om_adamw_update(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, N,     conf, s->step);
-        om_adamw_update(block->W_B.data,   s->g_W_B,   s->m_W_B,   s->v_W_B,   NR * D, conf, s->step);
-        om_adamw_update(block->W_C.data,   s->g_W_C,   s->m_W_C,   s->v_W_C,   NR * D, conf, s->step);
-        om_adamw_update(block->b_B,        s->g_b_B,   s->m_b_B,   s->v_b_B,   NR,     conf, s->step);
-        om_adamw_update(block->b_C,        s->g_b_C,   s->m_b_C,   s->v_b_C,   NR,     conf, s->step);
-        om_adamw_update(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  s->v_delta_proj,  D,  conf, s->step);
-        om_adamw_update(block->lambda_proj.data, s->g_lambda_proj, s->m_lambda_proj, s->v_lambda_proj, D,  conf, s->step);
-        om_adamw_update(block->theta, s->g_theta, s->m_theta, s->v_theta, TS, conf, s->step);
+        adamw_step_f32(block->W_in.data,  s->g_W_in,  s->m_W_in,  s->v_W_in,  conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, R * D, s->step);
+        adamw_step_f32(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, D * R, s->step);
+        adamw_step_f32(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, N, s->step);
+        adamw_step_f32(block->W_B.data,   s->g_W_B,   s->m_W_B,   s->v_W_B,   conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, NR * D, s->step);
+        adamw_step_f32(block->W_C.data,   s->g_W_C,   s->m_W_C,   s->v_W_C,   conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, NR * D, s->step);
+        adamw_step_f32(block->b_B,        s->g_b_B,   s->m_b_B,   s->v_b_B,   conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, NR, s->step);
+        adamw_step_f32(block->b_C,        s->g_b_C,   s->m_b_C,   s->v_b_C,   conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, NR, s->step);
+        adamw_step_f32(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  s->v_delta_proj,  conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, D,  s->step);
+        adamw_step_f32(block->lambda_proj.data, s->g_lambda_proj, s->m_lambda_proj, s->v_lambda_proj, conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, D,  s->step);
+        adamw_step_f32(block->theta, s->g_theta, s->m_theta, s->v_theta, conf->lr, 0.9f, 0.999f, conf->eps, conf->weight_decay, TS, s->step);
     }
 }
 
@@ -466,8 +443,8 @@ void mamba_block_forward_ws(MambaBlock *block, MambaBlockWorkspace *ws, float *o
         for (size_t t = 0; t < L; t++) {
             project_controller(block, &in[t * D], z, &u_seq[t * R]);
             ws->delta[t] = project_delta_value(block, &in[t * D], z);
-            om_gemv(block->W_B.data, &in[t * D], &ws->scan_B[t * NR], (int)NR, (int)D);
-            om_gemv(block->W_C.data, &in[t * D], &ws->scan_C[t * NR], (int)NR, (int)D);
+            gemv_f32(block->W_B.data, &in[t * D], &ws->scan_B[t * NR], (int)NR, (int)D);
+            gemv_f32(block->W_C.data, &in[t * D], &ws->scan_C[t * NR], (int)NR, (int)D);
             for (size_t i = 0; i < NR; i++) {
                 ws->scan_B[t * NR + i] += block->b_B[i];
                 ws->scan_C[t * NR + i] += block->b_C[i];
@@ -475,7 +452,7 @@ void mamba_block_forward_ws(MambaBlock *block, MambaBlockWorkspace *ws, float *o
         }
         _ssm_scan_forward(block, ws, u_seq, y_rank);
         for (size_t t = 0; t < L; t++) {
-            om_gemv(block->W_out.data, &y_rank[t * R], y_proj, (int)D, (int)R);
+            gemv_f32(block->W_out.data, &y_rank[t * R], y_proj, (int)D, (int)R);
             for (size_t d = 0; d < D; d++) out[t * D + d] = in[t * D + d] + y_proj[d];
         }
     }
@@ -543,4 +520,3 @@ void mamba_backward(MambaBlock *block, const float *dY, const float *input, floa
     mamba_backward_ws(block, ws, dY, input, d_input, batch_index);
     mamba_block_workspace_free(ws);
 }
-

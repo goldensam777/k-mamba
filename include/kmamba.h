@@ -3,41 +3,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "km_topology.h"
 #include "scan.h"
 #include "scan_nd.h"
+#include "convnd.h"
 #include "wavefront_plan.h"
 #include "wavefront_nd.h"
-#include "../optimatrix/include/optimatrix.h"
-
-#define KMAMBA_MAX_NDIMS 8
-
-/* ============================================================================
- * ConvND Types (Extended API for k-mamba)
- * ============================================================================ */
-
-/* Full ConvND depthwise reference API.
- * Kernel layout is [K^ndims, D] with the last axis varying fastest.
- * The support is causal on every axis, matching the existing separable ConvND. */
-typedef struct {
-    const float *input;   /* Input tensor [prod(dims), D] */
-    const float *kernel;  /* Full kernel [K^ndims, D] */
-    const float *bias;    /* Bias [D] or NULL */
-    float *output;        /* Output tensor [prod(dims), D] */
-    const float *dy;      /* Gradient w.r.t. output [prod(dims), D] */
-    float *dinput;        /* Gradient w.r.t. input [prod(dims), D] */
-    float *dkernel;       /* Gradient w.r.t. kernel [K^ndims, D] */
-    float *dbias;         /* Gradient w.r.t. bias [D] or NULL */
-    const long *dims;     /* Spatial shape [ndims] */
-    long ndims;           /* Number of spatial dimensions */
-    long D;               /* Depth/channels */
-    long K;               /* conv kernel_size ; distinct du state_size du scan */
-} ConvNDFullParams;
-
-long convnd_full_kernel_volume(long ndims, long K);
-void convnd_full_ref(ConvNDFullParams *p, ConvNDMode mode);
-void convnd_full_ref_with_plan(ConvNDFullParams *p,
-                               const KMWavefrontPlan *plan,
-                               ConvNDMode mode);
+#include "kmamba_kernels.h"
 
 /* ============================================================================
  * Basic Matrix type
@@ -161,9 +133,8 @@ typedef struct {
     KMWavefrontPlan *wavefront_plan;
     
     /* ConvND parameters */
-    float *convnd_kernel;  /* [convnd_ndims * convnd_K * dim] */
+    float *convnd_kernel;  /* [K^convnd_ndims * dim] - noyau dense wavefront */
     float *convnd_bias;    /* [dim] */
-    ConvNDWorkspace *convnd_ws;
     
     /* Runtime buffers */
     float *hidden;         /* [state_size] — SSM state at last timestep */

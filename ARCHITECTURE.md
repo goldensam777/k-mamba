@@ -6,7 +6,7 @@
 
 Le projet k-mamba repose sur une séparation architecturale fondamentale :
 - **Volontés** = intentions, logique modèle, orchestration (k-mamba)
-- **Puissance** = calcul brut, kernels optimisés (optimatrix)
+- **Puissance** = calcul brut, kernels optimisés (kernels/ inline)
 
 Cette séparation n'est pas technique seulement — elle est **philosophique**. Elle reflète la Théorie des Volontés : les systèmes doivent opérer par intentions qui convergent vers un équilibre, pas par instructions séquentielles.
 
@@ -14,80 +14,131 @@ Cette séparation n'est pas technique seulement — elle est **philosophique**. 
 
 ## Règle de séparation
 
-| Critère | k-mamba (Volontés) | optimatrix (Puissance) |
-|---------|-------------------|----------------------|
+| Critère | k-mamba (Volontés) | kernels (Puissance) |
+|---------|-------------------|---------------------|
 | Complexité | Triviale (5-10 lignes) | Intensive (millions d'itérations) |
 | Abstraction | Logique modèle, I/O | Kernels mathématiques purs |
-| Langage | C pur, lisible | C + ASM AVX2 + CUDA |
+| Langage | C pur, lisible | C pur + ASM AVX2 |
 | Optimisation | Clarté | Performance maximale |
-| Couverture | Architecture complète | Compute engine réutilisable |
+| Couverture | Architecture complète | Compute engine intégré |
 
-**Règle d'or** : Si c'est trivial, ça va dans k-mamba. Si ça boucle des millions de fois, ça va dans optimatrix.
+**Règle d'or** : Si c'est trivial, ça va dans k-mamba. Si ça boucle des millions de fois, ça va dans kernels/.
 
 ---
 
-## Structure de k-mamba
+## Structure de k-mamba (Zero Dependency)
 
 ```
 k-mamba/ — Les Volontés (orchestration du modèle Mamba)
 │
-├── include/kmamba.h
-│   └── API publique : KMamba, KMambaConfig, MambaBlock
-│       kmamba_create/init/free
-│       kmamba_forward/backward/train
-│       kmamba_save/load
+├── include/
+│   ├── kmamba.h           # API publique : KMamba, KMambaConfig, MambaBlock
+│   ├── kmamba_kernels.h   # Kernels inline (GEMM, activations, optimizers)
+│   ├── km_topology.h      # Couche topologique ND
+│   ├── wavefront_nd.h     # Générateur wavefront ND
+│   ├── wavefront_plan.h    # Plans exécutables
+│   ├── scan_nd.h          # Interface scan ND
+│   └── convnd.h           # Interface convND wavefront unifiée
 │
 ├── src/
-│   ├── kmamba.c           — Embedding, softmax, cross-entropy, training loop, checkpoint I/O
-│   ├── mamba_block.c      — Bloc SSM : projections, scan dispatch, MUON, buffers
-│   └── convnd.c           — Convolution ND (appelle conv1d_avx2 d'optimatrix)
+│   ├── kmamba.c           # Orchestration : forward, backward, checkpoint
+│   ├── mamba_block.c      # Bloc SSM : projections, scan dispatch, MUON
+│   ├── km_topology.c      # Normalisation topologique ND
+│   ├── wavefront_nd.c     # Générateur wavefront
+│   ├── wavefront_plan.c   # Plans wavefront
+│   ├── scan_nd.c          # Scan ND (wavefront séquentiel)
+│   └── convnd.c           # ConvND wavefront parallèle unifiée
 │
-├── cpu/                   — Kernels scan SSM (logique Mamba, CPU)
-│   ├── scan1d.asm         — Scan sélectif 1D forward (ASM)
-│   ├── scan2d.asm         — Scan sélectif 2D wavefront (ASM)
-│   ├── scan1d_backward*.c/.asm  — Backward 1D (C générique + ASM M=1)
-│   └── mamba_scan.c       — Dispatch CPU
+├── kernels/               # La Puissance (kernels inline C pur)
+│   ├── gemm_f32.c         # GEMM/GEMV en C pur
+│   ├── activations_f32.c  # SiLU, ReLU, Sigmoid, Softplus
+│   ├── optimizer_f32.c    # MUON, AdamW
+│   └── init_f32.c         # Xavier/Kaiming init
 │
-├── cuda/                  — Kernels scan SSM (Blelloch, CUDA)
-│   ├── scan1d.cu          — Blelloch parallel prefix scan 1D
-│   ├── scan1d_backward.cu — Backward scan 1D CUDA
-│   └── mamba_scan.cu      — Dispatch CUDA
+├── cpu/                   # ASM AVX2
+│   ├── scan1d.asm         # Scan 1D
+│   └── scan2d.asm         # Scan 2D wavefront
 │
-├── optimatrix/ (submodule)
-│   └── Moteur de calcul GÉNÉRIQUE — voir section dédiée
+├── cuda/                  # CUDA (optionnel)
+│   ├── scan1d.cu
+│   └── scan1d_backward.cu
 │
-└── CMakeLists.txt
-    └── Export k-mamba::k-mamba avec find_package support
+├── Makefile               # Build simple
+└── build.sh               # Script style Karpathy
 ```
 
 ---
 
-## Structure d'optimatrix
+## Unification ConvND Wavefront
 
-```
-optimatrix/ — La Puissance (kernels GÉNÉRIQUES réutilisables, sans logique SSM)
-│
-├── include/optimatrix.h
-│   └── API calcul générique (extern "C" — compatible NVCC) :
-│       ├── GEMM/GEMV (scalaire + AVX2)
-│       ├── Conv1D depthwise (AVX2) + ConvND séparable (C)
-│       ├── Activations : SiLU, Sigmoid, Softplus, ReLU (AVX2)
-│       ├── Hadamard (AVX2)
-│       └── Optimiseurs : gradient_clip, AdamW, MUON (CPU + CUDA)
-│
-├── cpu/
-│   ├── gemm.asm, gemm_avx2.asm      ← GEMM scalaire + AVX2
-│   ├── gemv.asm, gemv_avx2.asm      ← GEMV scalaire + AVX2
-│   ├── hadamard.asm                  ← Produit élément par élément
-│   ├── activations.asm               ← SiLU, Sigmoid, Softplus (AVX2)
-│   ├── conv1d_avx2.asm              ← Conv1D depthwise causale
-│   └── optimizer_utils.c            ← gradient_clip, Newton-Schulz, MUON CPU
-│
-└── cuda/
-    └── optimizer_utils.cu           ← Gradient clipping, AdamW, MUON CUDA ✅
+**Avant** : Deux implémentations séparées
+- `convnd()` : séparable séquentiel (legacy)
+- `convnd_full_ref()` : dense wavefront parallèle
+
+**Après** : Une seule implémentation wavefront unifiée
+
+```c
+// convnd.h — API unifiée
+typedef struct {
+    float *input;           // [prod(dims), D]
+    const float *kernel;    // [K^ndims, D] — noyau complet
+    const float *bias;      // [D] or NULL
+    float *output;          // [prod(dims), D]
+    // ... gradients
+    const long *dims;       // shape [ndims]
+    long ndims, D, K;
+} ConvNDParams;
+
+// Forward wavefront parallèle
+void convnd_forward_wavefront(ConvNDParams *p, const KMWavefrontPlan *plan);
+
+// Backward wavefront
+void convnd_backward_wavefront(ConvNDParams *p, const KMWavefrontPlan *plan);
+
+// Entry point unifié
+void convnd(ConvNDParams *p, ConvNDMode mode);
 ```
 
-**Les scans (scan1d.asm, scan2d.asm, scan1d_backward.c, scan1d.cu…) sont dans `k-mamba/cpu/` et `k-mamba/cuda/`, pas dans optimatrix.**
+**Caractéristiques** :
+- Noyau complet dense `K^N` (pas de séparabilité)
+- Ordonnancement wavefront natif
+- Parallélisme intra-niveau OpenMP optionnel
+- Même topologie que `scanND`
+
+---
+
+## Dualité ScanND/ConvND (même squelette)
+
+| Aspect | ScanND | ConvND |
+|--------|--------|--------|
+| **Type** | Récurrence d'état | Convolution locale |
+| **Dépendances** | `h(n - e_k)` | `x(n - r)` pour `r ∈ [0,K-1]^N` |
+| **Wavefront** | Nécessaire (ordre topo) | Volontaire (unification) |
+| **Parallélisme** | Intra-niveau OpenMP | Intra-niveau OpenMP |
+| **Plan** | `KMWavefrontPlan` | `KMWavefrontPlan` (partagé) |
+
+**Thèse** : Même squelette topologique, deux opérateurs complémentaires.
+
+---
+
+## Zero Dependency
+
+**Ce que k-mamba nécessite** :
+- `gcc >= 11`
+- `nasm >= 2.15`
+- `libc`, `libm`
+
+**Ce que k-mamba n'utilise PAS** :
+- ❌ CMake
+- ❌ OpenBLAS
+- ❌ optimatrix (submodule supprimé)
+- ❌ OpenMP (optionnel, pas obligatoire)
+- ❌ Python/PyTorch
+
+**Build** :
+```bash
+make          # Crée libkmamba.a
+```
 
 ---
 
@@ -102,65 +153,27 @@ Appel utilisateur
 │ 1. embed_lookup() — memcpy        │
 │ 2. Pour chaque layer :            │
 │    mamba_block_forward()          │
-│ 3. gemm_avx2(head, hidden)        │
-│       └──> optimatrix              │
+│ 3. gemm_f32(head, hidden)         │
+│       └──> kernels/                │
 └─────────────────────────────────────┘
-                                   │
-       ▼                           │
+       │
+       ▼
 ┌─────────────────────────────────┐
 │ mamba_block_forward() (k-mamba) │
-│ 1. gemv_avx2(W_in, x)           │  ← optimatrix
-│ 2. silu_f32()                   │  ← optimatrix
-│ 3. gemv_avx2(delta_proj, x)     │  ← optimatrix
-│ 4. softplus + clamp             │  ← optimatrix
-│ 5. scan1d() or scan2d()         │  ← k-mamba/cpu/ (ASM)
-│ 6. gemv_avx2(W_out, h)          │  ← optimatrix
+│ 1. gemv_f32(W_in, x)             │  ← kernels/
+│ 2. silu_f32()                   │  ← kernels/
+│ 3. gemv_f32(delta_proj, x)      │  ← kernels/
+│ 4. softplus + clamp             │  ← kernels/
+│ 5. scan1d() or scan2d()         │  ← cpu/ (ASM)
+│ 6. gemv_f32(W_out, h)            │  ← kernels/
 │    └──> retourne à k-mamba      │
 └─────────────────────────────────┘
-                                   │
-       ▼                           │
+       │
+       ▼
 ┌─────────────────────────────────────┐
 │ k-mamba : suite du forward        │
-│ 4. softmax() + cross-entropy()   │
-│ 5. retourne logits/loss          │
-└─────────────────────────────────────┘
-```
-
----
-
-## Cycle de vie d'une backward pass
-
-```
-      Appel utilisateur
-            │
-            ▼
-┌─────────────────────────────────────┐
-│ k-mamba : kmamba_train_step()       │
-│  1. Forward avec sauvegarde activ.  │
-│  2. Cross-entropy loss              │
-│  3. dlogits = softmax - one_hot     │
-│  4. d_hidden = dlogits @ head^T     │
-│  5. Pour chaque layer (reverse) :   │
-│     mamba_backward()                │
-│  6. Gradients embedding (scatter)   │
-│  7. Optimizer step (MUON + AdamW)   │
-└─────────────────────────────────────┘
-                                   │
-       ▼                           
-┌───────────────────────────────────────┐
-│ mamba_backward() (k-mamba)            │
-│  1. Recompute forward (store)         │
-│  2. Backprop W_out (GEMM)             │  ← optimatrix
-│  3. scan1d_backward() (ASM/C)         │  ← k-mamba/cpu/
-│  4. Backprop SiLU                     │  ← optimatrix
-│  5. Backprop W_in (GEMM)              │  ← optimatrix
-│  6. Accumulation gradients            │
-└───────────────────────────────────────┘
-
-                     ▼
-┌─────────────────────────────────────┐
-│ optimatrix : mamba_optimizer_step()  │
-│  (MUON via Newton-Schulz)        │
+│ 4. softmax() + cross-entropy()     │
+│ 5. retourne logits/loss            │
 └─────────────────────────────────────┘
 ```
 
@@ -174,17 +187,17 @@ Appel utilisateur
 // Une Volonté se manifeste par sa transformation
 void mamba_block_forward(MambaBlock *block, float *out, const float *in, size_t batch) {
     // La Volonté projette l'entrée dans son espace d'état
-    gemm_avx2(in, block->W_in.data, tmp, ...);
+    gemv_f32(in, block->W_in.data, tmp, ...);
     
     // La Volonté choisit quoi retenir (selectivité)
-    silu_f32_avx2(tmp, u, ...);
+    silu_f32(tmp, u, ...);
     compute_delta(dt, in, block->delta_proj);
     
-    // La Volonté propage son état (récurrence)
+    // La Volonté propage son état (récurrence wavefront)
     scan1d(&params);  // ou scan2d pour ND
     
     // La Volonté projette sa décision
-    gemm_avx2(h, block->W_out.data, out, ...);
+    gemv_f32(h, block->W_out.data, out, ...);
 }
 ```
 
@@ -199,40 +212,6 @@ void mamba_optimizer_step(MambaBlock *block, MBOptimConfig *conf) {
 }
 ```
 
-### Un bug = conflit de Volontés
-
-Dans la Théorie des Volontés, un bug n'est pas une erreur d'instruction.
-C'est un **conflit de Volontés non résolu**.
-
-Exemple : si deux MambaBlocks tentent de modifier la même mémoire,
-c'est un conflit d'intentions — résolu par l'ordonnancement de k-mamba.
-
----
-
-## Pourquoi cette séparation est puissante
-
-### 1. Réutilisabilité
-
-optimatrix peut être utilisé par d'autres projets (pas seulement Mamba) :
-- Traitement d'images (ConvND séparable)
-- Algèbre linéaire (GEMM/GEMV AVX2)
-- Optimisation (gradient clipping, AdamW, MUON — CPU + CUDA)
-
-### 2. Testabilité
-
-Les kernels ASM peuvent être testés unitairement (phase 1-5 dans optimatrix).
-k-mamba peut être testé avec des mocks.
-
-### 3. Portabilité
-
-Pour porter sur ARM NEON ou AVX-512 : modifier optimatrix uniquement.
-k-mamba reste du C pur portable.
-
-### 4. Clarté
-
-Un chercheur peut lire k-mamba en une heure et comprendre l'architecture complète.
-Les détails de calcul sont encapsulés dans optimatrix.
-
 ---
 
 ## Vision long terme
@@ -240,20 +219,19 @@ Les détails de calcul sont encapsulés dans optimatrix.
 k-mamba est une brique fondatrice vers un **OS-IA post-Von Neumann** :
 - Processus = Volontés (MambaBlocks)
 - Communication = streams de tenseurs
-- Scheduler = ordonnancement wavefront
+- Scheduler = ordonnancement wavefront unifié
 - Mémoire = états persistants (h_t)
 
 La séparation Volontés/Puissance préfigure cette architecture :
 - Les Volontés sont les processus métier
-- La Puissance est le moteur d'exécution
+- La Puissance est le moteur d'exécution (inline, zero-dependency)
 
 ---
 
 ## Références
 
 - **AGENTS.md** — Contexte technique et philosophique
-- **THEORY.md** — Fondement mathématique Mamba-ND
-- **ESTIMATIONS.md** — Complexité et benchmarks
+- **THEORY.md** — Fondement mathématique Mamba-ND unifié
 
 ---
 

@@ -1,22 +1,138 @@
 # THEORY.md - Fondement mathematique de k-mamba
 
-## 1. Idee centrale
+## 0. Théorie générale : Systèmes causaux ND et topologie wavefront
 
-Le coeur theorique de `k-mamba` n'est pas seulement "un scan 2D" ou
-"une convND". La contribution generale est :
+### 0.1 Positionnement scientifique
+
+Ce projet formule une théorie des **systèmes causaux multi-dimensionnels sur grilles régulières**, fondée sur quatre piliers :
+
+**Pilier I : Topologie causale comme primitive fondatrice**
+
+Le niveau wavefront ND, défini par `l(n) = Σ n_i`, constitue l'ordonnancement topologique universel pour tout opérateur causal sur grille N-dimensionnelle. Ce n'est pas une heuristique d'implémentation mais une propriété structurelle du DAG causal sous-jacent.
+
+**Pilier II : Unification des opérateurs via le squelette topologique**
+
+ScanND (récurrence d'état avec mémoire longue) et ConvND (convolution locale à noyau dense) partagent le même squelette d'exécution wavefront. Seul le calcul élémentaire par position diffère :
+- ScanND : `h(n) = Σ A_k · h(n-e_k) + B(n)·x(n)`
+- ConvND : `z(n) = Σ K(r)·x(n-r)` pour `r ∈ [0,K-1]^N`
+
+Cette unification révèle que la complexité algorithmique réside dans la topologie d'ordonnancement, non dans le calcul local.
+
+**Pilier III : Parallélisme structurel intra-niveau**
+
+Le parallélisme exploitable est une propriété géométrique exacte : tous les points d'un même niveau wavefront sont mutuellement indépendants (Corollaire 4.3). Ce parallélisme est borné par la largeur du niveau, atteignant Θ(d) pour une grille d×d en 2D.
+
+**Pilier IV : Architecture Volontés/Puissance**
+
+Séparation philosophique entre intention (logique modèle, orchestration dans k-mamba) et calcul (kernels optimisés dans kernels/). Cette dualité reflète la Théorie des Volontés : les systèmes opèrent par intentions convergentes vers un équilibre, où chaque MambaBlock est une Volonté qui transforme la séquence, et MUON arbitre les tensions entre gradients.
+
+### 0.2 Contribution originale
+
+Contrairement à l'état de l'art (VMamba, Mamba-ND) qui décompose la dimensionnalité en scans 1D séquentiels, cette théorie propose deux innovations majeures :
+
+**1. Récurrence ND simultanée.** La récurrence native `h(n) = Σ A_k·h(n-e_k) + B(n)·x(n)` remplace les compositions de scans 1D.
+
+**2. Convolution ND unifiée par wavefront.** La convolution dense `z(n) = Σ K(r)·x(n-r)` partage le même squelette topologique wavefront que le scan, avec parallélisme intra-niveau. Cette unification théorique remplace les approches séparables ou séquentielles traditionnelles.
+
+Le wavefront devient la **primitive mère** partagée par tous les opérateurs causaux ND.
+
+### 0.3 Théorème central (Caractérisation exacte)
+
+**Théorème (Classe des opérateurs causaux wavefront-exécutables).**
+
+Soit `O` un opérateur sur grille ND régulière `G = [0,d₁)×⋯×[0,dₙ)`. Les propositions suivantes sont équivalentes :
+
+**(i)** `O` est exécutable par parcours wavefront niveau par niveau, avec parallélisme intra-niveau exact.
+
+**(ii)** Le graphe de dépendances de `O` est un sous-graphe du DAG causal défini par l'ordre partiel `m ≺ n` ssi `l(m) < l(n)`.
+
+**(iii)** Pour tout point `n`, les dépendances de `O` ne pointent que vers des points de niveau strictement inférieur (`l(m) < l(n)`), et il n'existe pas de dépendances entre points d'un même niveau.
+
+**Preuve.**
+
+*(i) ⇒ (ii)* : Par construction du parcours wavefront, tout point `n` au niveau `s` n'est calculé qu'après tous les niveaux `< s`. Donc toute dépendance de `n` pointe nécessairement vers un niveau strictement inférieur. Le graphe de dépendances est bien un sous-graphe du DAG causal défini par `l(m) < l(n)`. ∎
+
+*(ii) ⇒ (iii)* : Immédiat. Si le graphe de dépendances est un sous-graphe du DAG `l(m) < l(n)`, alors (a) toute dépendance pointe vers un niveau strictement inférieur, et (b) deux points du même niveau `s` ne peuvent être liés car cela contredirait `l(m) < l(n)` avec `l(m) = l(n) = s`. ∎
+
+*(iii) ⇒ (i)* : Construisons le parcours wavefront et montrons qu'il est correct.
+
+- **Initialisation.** Le niveau `0` contient uniquement l'origine `0`. Ce point n'a aucun prédécesseur dans la grille (`n - e_k` serait hors domaine pour tout `k`). Il est calculable sans dépendance. ✓
+
+- **Hérédité.** Supposons que tous les niveaux `0, 1, …, s-1` ont été calculés correctement. Soit `n` un point du niveau `s`, i.e. `l(n) = s`. Par (iii), toute dépendance de `n` pointe vers un point `m` avec `l(m) < s`. Donc `m` appartient à un niveau déjà calculé. La valeur `O[n]` est donc calculable. ✓
+
+- **Parallélisme intra-niveau.** Soient `n₁, n₂` deux points distincts du niveau `s`. Par (iii), il n'existe pas de dépendance entre eux. Leurs calculs sont mutuellement indépendants et parallélisables. ✓
+
+*Conclusion.* Le parcours niveau par niveau `0, 1, …, l_max` est un ordre topologique valide du DAG causal, avec parallélisme intra-niveau exact. `O` est wavefront-exécutable au sens de (i). ∎
+
+**Corollaire.** La classe des opérateurs causaux ND sur grilles régulières coïncide exactement avec la classe des opérateurs wavefront-exécutables.
+
+---
+
+## 0.4 Positionnement critique : axiomes violés
+
+Notre théorie procède par **violation constructive** de deux axiomes implicites de l'état de l'art.
+
+### Axiome 1 : Causalité = Séquentialité (Gu et Dao, 2023)
+
+**Le présupposé.** Dans la théorie originale de Mamba, la causalité temporelle implique une dépendance séquentielle : `h_t` ne dépend que de `h_{t-1}`. La récurrence est une chaîne linéaire.
+
+**La généralisation.** En dimension N, nous montrons que la **causalité n'implique pas la séquentialité**. Un état `h(i,j)` dépend de deux prédécesseurs simultanés `(i-1,j)` et `(i,j-1)`, mais ces dépendances respectent un ordre partiel strict (le wavefront).
+
+**Le résultat.** L'ordre partiel expose un parallélisme structurel exact : tous les points d'un niveau wavefront sont indépendants et traitables en parallèle. La théorie de Gu et Dao est le cas limite N=1 où le parallélisme intra-niveau se réduit à un seul point.
+
+**Conséquence.** Nous déplaçons la complexité : ce n'est plus la dimension qui crée la complexité (par décomposition séquentielle), c'est la profondeur topologique `l(n)` qui structure le calcul parallèle.
+
+---
+
+### Axiome 2 : Convolution ND = Séparable (État de l'art classique)
+
+**Le présupposé.** Une convolution ND efficace doit être décomposée en N convolutions 1D séquentielles (séparabilité). La convolution dense `K^N` serait prohibitive.
+
+**La violation.** Nous montrons que la convolution ND **dense** (noyau complet, non séparable) devient viable grâce au wavefront. Le même squelette topologique qui rend le scanND parallèle s'applique à la convolution.
+
+**Le mécanisme.**
+- Convolution séparable classique : N passes 1D séquentielles, complexité `N·K·d^N`.
+- Convolution dense wavefront : une passe wavefront, parallélisme intra-niveau, complexité `K^N·d^N` mais avec parallélisme Θ(d).
+
+**Pourquoi c'est préférable.**
+1. **Interactions croisées.** Une convolution dense capture les interactions diagonales `(i-1, j-1)` que la séparabilité ignore.
+2. **Unification théorique.** ScanND et ConvND partagent le même squelette — ce n'est plus deux algorithmes distincts, mais deux instances d'une primitive topologique commune.
+3. **Parallélisme structurel.** Le parallélisme n'est pas une heuristique (tiling, blocking), c'est une propriété géométrique du DAG causal.
+
+---
+
+### Synthèse : la primitive wavefront comme fondement
+
+Ces deux violations convergent vers une même primitive : le **wavefront ND** comme ordonnancement topologique universel pour les opérateurs causaux sur grilles régulières.
+
+| Axiome violé | Avant (séparable/séquentiel) | Après (wavefront unifié) |
+|--------------|------------------------------|--------------------------|
+| Causalité | Chaîne linéaire 1D | Ordre partiel ND |
+| Convolution | N passes 1D | Une passe wavefront parallèle |
+| Parallélisme | Inter-batch seulement | Intra-niveau exact |
+| Unification | Aucune (scan vs conv distincts) | Squelette commun |
+
+**Thèse centrale.** Le wavefront n'est pas une optimisation d'implémentation. C'est la structure topologique fondatrice qui révèle que les opérateurs causaux ND sont fondamentalement parallèles, simultanés, et unifiables.
+
+---
+
+## 1. Idée centrale
+
+Le coeur théorique de `k-mamba` n'est pas seulement "un scan 2D" ou
+"une convND". La contribution générale est :
 
 - une topologie causale ND sur grille
-- un generateur de wavefront borne
-- un squelette d'execution commun pour les operateurs causaux ND
+- un générateur de wavefront borné
+- un squelette d'exécution commun pour les opérateurs causaux ND
 
 Autrement dit :
 
-- `scanND` est une premiere instance de cette topologie
-- `convND` native simultanee est une seconde instance
-- le generateur `wavefront_nd_*` est la primitive fondatrice commune
+- `scanND` est une première instance de cette topologie
+- `convND` native wavefront est une seconde instance
+- le générateur `wavefront_nd_*` est la primitive fondatrice commune
 
-Le projet ne se limite donc pas a etendre Mamba en ND. Il pose une structure
-topologique universelle pour les operateurs causaux ND sur tenseurs.
+Le projet ne se limite donc pas à étendre Mamba en ND. Il pose une structure
+topologique universelle pour les opérateurs causaux ND sur tenseurs.
 
 ---
 
@@ -24,7 +140,7 @@ topologique universelle pour les operateurs causaux ND sur tenseurs.
 
 ### 2.1 SSM continu
 
-Un State Space Model lineaire continu s'ecrit :
+Un State Space Model linéaire continu s'écrit :
 
 ```math
 \dot{h}(t) = A h(t) + B u(t), \qquad y(t) = C h(t)
@@ -32,33 +148,30 @@ Un State Space Model lineaire continu s'ecrit :
 
 avec :
 
-- `h(t) in R^M` : etat latent
-- `u(t) in R^D` : entree
-- `A in R^{M x M}` : dynamique d'etat
-- `B in R^{M x D}` : couplage entree -> etat
-- `C in R^{D x M}` : projection etat -> sortie
+- `h(t) ∈ R^M` : état latent
+- `u(t) ∈ R^D` : entrée
+- `A ∈ R^{M×M}` : dynamique d'état
+- `B ∈ R^{M×D}` : couplage entrée → état
+- `C ∈ R^{D×M}` : projection état → sortie
 
-### 2.2 Discretisation selective
+### 2.2 Discrétisation sélective
 
-Apres discretisation de type ZOH, puis selectivite Mamba, on obtient :
+Après discrétisation de type ZOH, puis sélectivité Mamba, on obtient :
 
 ```math
-\delta_t = softplus(W_delta x_t), \qquad
-B_t = f_B(x_t), \qquad
-C_t = f_C(x_t)
+δ_t = softplus(W_δ x_t), \qquad B_t = f_B(x_t), \qquad C_t = f_C(x_t)
 ```
 
-et la recurrence :
+et la récurrence :
 
 ```math
-h_t = \bar{A}_t h_{t-1} + \bar{B}_t x_t, \qquad y_t = C_t h_t
+h_t = Ā_t h_{t-1} + B̄_t x_t, \qquad y_t = C_t h_t
 ```
 
-Dans la representation scalaire par canal `d` et etat `m` :
+Dans la représentation scalaire par canal `d` et état `m` :
 
 ```math
-a_t^{d,m} = e^{\delta_t^d A^{d,m}}, \qquad
-b_t^{d,m} = \delta_t^d B_t^{d,m} x_t^d
+a_t^{d,m} = e^{δ_t^d A^{d,m}}, \qquad b_t^{d,m} = δ_t^d B_t^{d,m} x_t^d
 ```
 
 ```math
@@ -66,330 +179,219 @@ h_t^{d,m} = a_t^{d,m} h_{t-1}^{d,m} + b_t^{d,m}
 ```
 
 ```math
-y_t^d = \sum_m C_t^{d,m} h_t^{d,m}
+y_t^d = Σ_m C_t^{d,m} h_t^{d,m}
 ```
 
-### 2.3 Monoid du scan SSM
+### 2.3 Monoïde du scan SSM
 
-La recurrence 1D admet la representation :
+La récurrence 1D admet la représentation :
 
 ```math
 (a_t, b_t) \quad \text{telle que} \quad h_t = a_t h_{t-1} + b_t
 ```
 
-avec l'operateur de composition :
+avec l'opérateur de composition :
 
 ```math
-(a_1, b_1) \otimes (a_2, b_2) = (a_1 a_2, a_2 b_1 + b_2)
+(a_1, b_1) ⊗ (a_2, b_2) = (a_1 a_2,\ a_2 b_1 + b_2)
 ```
 
-Cet operateur est associatif et son neutre est `(1, 0)`.
-Le scan Mamba est donc un scan prefixe sur un monoid non commutatif.
+Cet opérateur est associatif et son neutre est `(1, 0)`.
+Le scan Mamba est donc un scan préfixe sur un monoïde non commutatif.
 
 ---
 
 ## 3. Extension ND native
 
-### 3.1 Tenseur d'entree
+### 3.1 Tenseur d'entrée
 
 Soit :
 
 ```math
-X \in R^{d_1 \times d_2 \times \cdots \times d_N \times D}
+X ∈ R^{d_1 × d_2 × ⋯ × d_N × D}
 ```
 
-et une position :
+avec :
+
+- `d_1, …, d_N` : dimensions spatiales
+- `D` : profondeur (canaux)
+
+### 3.2 Récurrence ND simultanée
+
+L'extension native de Mamba vers N dimensions s'écrit :
 
 ```math
-\mathbf{n} = (n_1, n_2, \ldots, n_N)
-```
-
-avec `0 <= n_k < d_k`.
-
-### 3.2 Recurrence ND
-
-La recurrence ND native de `k-mamba` est :
-
-```math
-h(\mathbf{n}) =
-\sum_{k=1}^{N} \bar{A}_k(\mathbf{n}) h(\mathbf{n} - \mathbf{e}_k)
- + \bar{B}(\mathbf{n}) x(\mathbf{n})
+h(n) = Σ_{k=1}^{N} Ā_k(n) · h(n - e_k) + B̄(n) · x(n)
 ```
 
 ```math
-y(\mathbf{n}) = C(\mathbf{n}) h(\mathbf{n})
+y(n) = C(n) · h(n)
 ```
 
-ou :
+avec :
 
-- `e_k` est le vecteur unite de l'axe `k`
-- `h(n) = 0` des qu'un indice sort du domaine
-- `bar(A)_k(n)` code la propagation depuis le predecesseur sur l'axe `k`
+- `n = (n_1, …, n_N)` : coordonnées ND
+- `e_k` : vecteur unitaire de l'axe k
+- `A_k` : dynamique d'état selon axe k (input-dependent)
+- `B` : couplage entrée → état
+- `C` : projection état → sortie
 
-La difference fondamentale avec `VMamba` et `Mamba-ND` est que les `N`
-predecesseurs sont agreges simultanement au meme pas de recurrence. Ce n'est
-pas une alternance de scans 1D ; c'est une dynamique ND unique.
+### 3.3 Différence avec l'état de l'art
+
+- **VMamba (2024)** : 4 scans 1D successifs dans 4 directions (cross-scan)
+- **Mamba-ND (Li et al.)** : scans 1D alternés par couche
+- **k-mamba** : **récurrence ND simultanée**, pas de décomposition séquentielle
 
 ---
 
-## 4. Primitive topologique : le wavefront ND
+## 4. Le wavefront comme ordre topologique
 
-### 4.1 Niveau topologique
+### 4.1 Définition du niveau
 
-On definit le niveau d'un indice ND par :
-
-```math
-\ell(\mathbf{n}) = \sum_{k=1}^{N} n_k
-```
-
-Le niveau maximal d'une grille `d_1 x ... x d_N` est :
+Pour un point `n = (n_1, …, n_N)` dans une grille ND, on définit :
 
 ```math
-\ell_{max} = \sum_{k=1}^{N} (d_k - 1)
+l(n) = n_1 + n_2 + ⋯ + n_N
 ```
 
-Le `wavefront` de niveau `s` est :
+C'est la **distance de Manhattan** depuis l'origine, ou la **profondeur topologique**
+dans le DAG causal.
+
+### 4.2 Lemme de causalité
+
+**Lemme** : Si un opérateur ND causal dépend de positions `n - e_k`
+(vecteurs unitaires), alors toute dépendance récurrente de `n` pointe vers
+un niveau strictement inférieur.
+
+**Démonstration** :
 
 ```math
-\mathcal{D}_s = \{ \mathbf{n} \mid \ell(\mathbf{n}) = s \}
+l(n - e_k) = (n_1 + ⋯ + n_N) - 1 = l(n) - 1 < l(n)
 ```
 
-Ce sont les hyper-diagonales ND.
+CQFD. ∎
 
-### 4.2 Operateurs causaux bornes
+### 4.3 Corollaire d'indépendance
 
-On introduit maintenant la classe generale des operateurs causaux ND.
+**Corollaire.** Deux points distincts `n₁, n₂` du même niveau `l(n₁) = l(n₂) = k` sont mutuellement indépendants.
 
-#### Definition
+*Preuve.* Supposons `n₁` dépend de `n₂`. Alors `n₁ = n₂ + eⱼ` pour un axe `j`. Donc `l(n₁) = l(n₂) + 1 = k + 1 ≠ k`. Contradiction. ∎
 
-Un operateur ND sur grille est dit causal borne s'il existe un support fini
-`R subset N^N` tel que la valeur en `n` ne depend que de :
+**Conséquence.** Tous les points d'un même niveau wavefront sont parallélisables.
 
-- donnees externes `x(n-r)` pour `r in R`
-- et, pour les variables recurrentes, uniquement d'etats `h(n-r)` avec `r != 0`
+### 4.4 Théorème du squelette topologique
 
-et chaque dependance invalide hors du domaine vaut zero.
+**Théorème** :
 
-Deux cas particuliers nous interessent :
+Tout opérateur ND causal borné dont les dépendances récurrentes vont vers des
+niveaux strictement inférieurs peut être exécuté correctement par parcours des
+niveaux `0, 1, 2, …, l_max`, et à chaque niveau `s`, tous les points de `D_s`
+peuvent être traités en parallèle.
 
-1. recurrence d'etat :
+**Démonstration** :
 
-```math
-h(\mathbf{n}) = \Phi(\{h(\mathbf{n} - \mathbf{r})\}_{\mathbf{r} \in R_h},
-                     \{x(\mathbf{n} - \mathbf{r})\}_{\mathbf{r} \in R_x})
-```
-
-avec `0 notin R_h`
-
-2. convolution locale :
-
-```math
-z(\mathbf{n}) = \sum_{\mathbf{r} \in R_x} K(\mathbf{r}) x(\mathbf{n} - \mathbf{r})
-```
-
-ou `R_x` est borne et causal
-
-### 4.3 Lemma fondamental
-
-#### Lemma
-
-Si `r in N^N` et `r != 0`, alors pour tout indice valide `n-r` :
-
-```math
-\ell(\mathbf{n} - \mathbf{r}) = \ell(\mathbf{n}) - \ell(\mathbf{r}) < \ell(\mathbf{n})
-```
-
-#### Demonstration
-
-Comme `r in N^N`, toutes les composantes de `r` sont positives ou nulles.
-Comme `r != 0`, il existe au moins une composante strictement positive.
-Donc :
-
-```math
-\ell(\mathbf{r}) = \sum_k r_k > 0
-```
-
-Par linearite de la somme :
-
-```math
-\ell(\mathbf{n} - \mathbf{r}) = \sum_k (n_k - r_k)
-= \sum_k n_k - \sum_k r_k
-= \ell(\mathbf{n}) - \ell(\mathbf{r})
-```
-
-et comme `ell(r) > 0`, on obtient :
-
-```math
-\ell(\mathbf{n} - \mathbf{r}) < \ell(\mathbf{n})
-```
-
-CQFD.
-
-### 4.4 Corollaire d'independance intra-wavefront
-
-#### Corollaire
-
-Pour toute recurrence ND causale bornee, deux points distincts d'un meme niveau
-ne peuvent pas dependre l'un de l'autre.
-
-#### Demonstration
-
-Soient `n1` et `n2` deux indices tels que :
-
-```math
-\ell(\mathbf{n}_1) = \ell(\mathbf{n}_2)
-```
-
-Supposons que `n1` depende de `n2`. Alors il existe `r != 0` tel que :
-
-```math
-\mathbf{n}_2 = \mathbf{n}_1 - \mathbf{r}
-```
-
-Le lemme precedent impose alors :
-
-```math
-\ell(\mathbf{n}_2) < \ell(\mathbf{n}_1)
-```
-
-ce qui contredit `ell(n1) = ell(n2)`.
-
-Donc les points d'un meme wavefront sont mutuellement independants.
-
-CQFD.
-
-### 4.5 Theoreme du squelette topologique
-
-#### Theoreme
-
-Tout operateur ND causal borne dont les dependances recurrentes vont vers des
-niveaux strictement inferieurs peut etre execute correctement par parcours des
-niveaux :
-
-```math
-0, 1, 2, \ldots, \ell_{max}
-```
-
-et, a chaque niveau `s`, tous les points de `D_s` peuvent etre traites en
-parallele.
-
-#### Demonstration
-
-- Par le lemme, toute dependance recurrente de `n` pointe vers un niveau
-  strictement plus petit que `ell(n)`.
-- Donc, quand on commence le calcul du niveau `s`, toutes les donnees
-  recurrentes requises ont deja ete produites aux niveaux `< s`.
-- Par le corollaire, aucun point de `D_s` ne depend d'un autre point de `D_s`.
+- Par le lemme, toute dépendance récurrente de `n` pointe vers un niveau
+  strictement plus petit que `l(n)`.
+- Donc, quand on commence le calcul du niveau `s`, toutes les données
+  récurrentes requises ont déjà été produites aux niveaux `< s`.
+- Par le corollaire, aucun point de `D_s` ne dépend d'un autre point de `D_s`.
 
 Le parcours par wavefront est donc un ordre topologique valide du DAG causal,
-et le parallelisme intra-wavefront est exact.
-
-CQFD.
+et le parallélisme intra-wavefront est exact. ∎
 
 ---
 
-## 5. Pourquoi cela couvre a la fois scanND et convND
+## 5. Convolution ND native wavefront
 
-### 5.1 ScanND
+### 5.1 Formulation
 
-Le `scanND` entre dans le cas recurrent. Les dependances portent sur :
-
-```math
-h(\mathbf{n} - \mathbf{e}_1), \ldots, h(\mathbf{n} - \mathbf{e}_N)
-```
-
-Chaque vecteur `e_k` est non nul, donc toute dependance va vers un niveau
-strictement inferieur. Le wavefront n'est pas un heuristique : c'est l'ordre
-topologique exact.
-
-### 5.2 ConvND native simultanee
-
-La `convND` que nous voulons pour `K-Mamba` n'est pas une chaine de Conv1D
-separables. C'est une convolution ND native a noyau plein :
+La convolution ND que nous implémentons est une convolution native à noyau
+plein, dense, avec ordonnancement wavefront :
 
 ```math
-z(\mathbf{n}) = \sum_{\mathbf{r} \in [0, K-1]^N} K(\mathbf{r}) x(\mathbf{n} - \mathbf{r})
+z(n) = Σ_{r ∈ [0,K-1]^N} K(r) · x(n - r)
 ```
 
-Le point essentiel est que :
+Le noyau est un tenseur ND complet :
 
-- les axes se voient dans le meme noyau `K(r_1, ..., r_N)`
-- l'operateur est simultane, pas factorise
-- les dependances portent sur l'entree `x`, pas sur les sorties `z`
+```math
+K : [0, K-1]^N × [0, D-1] → R
+```
 
-Donc mathematiquement, une telle convolution peut etre evaluee dans n'importe
-quel ordre puisque `x` est une donnee lue seule.
+### 5.2 La convolution ND comme décision architecturale unifiée
 
-Mais si son support est causal borne, elle est compatible avec le meme
-squelette wavefront que le scan :
+Bien que la convolution ND dense ne nécessite pas théoriquement d'ordre
+particulier (car elle lit seulement `x` qui est déjà connu), le choix du
+wavefront comme ordonnancement commun est une **décision architecturale**,
+pas une nécessité logique isolée.
 
-- non parce qu'elle en a besoin pour etre correcte
-- mais parce que le wavefront fournit une discipline topologique commune
-- et une API d'ordonnancement unifiee pour tous les operateurs causaux ND
+Dans le contexte du bloc hybride ND (Section 6), où ConvND et ScanND
+coexistent sur le même domaine causal, cet ordonnancement devient
+**nécessaire** pour garantir la causalité du bloc composé.
 
-En pratique :
+**Pourquoi ce choix est préférable :**
 
-- pour `scanND`, le wavefront est necessaire
-- pour `convND`, le wavefront est un ordonnancement commun volontaire
+| Aspect | Bénéfice |
+|--------|----------|
+| **Unification** | Même API, même plan que scanND |
+| **Parallélisme** | Intra-niveau parfaitement parallélisable |
+| **Cache** | Accès spatialement cohérents par niveau |
+| **Prévisibilité** | Ordonnancement déterministe, debuggable |
+| **Extensibilité** | Tout futur opérateur causal ND utilisera le même squelette |
+
+La complexité algorithmique ne réside pas dans la nature (récurrente ou
+convolutive) de l'opérateur, mais dans la **topologie du DAG causal
+sous-jacent**. C'est ce que l'unification wavefront établit.
 
 ---
 
-## 6. ConvND simultanee versus convND separable
+## 6. Vision K-Mamba unifiée
 
-### 6.1 Convolution separable
+Le "vrai K-Mamba" vise deux primitives natives ND partageant le même
+ordonnancement topologique wavefront :
 
-La version separable axe par axe suppose :
+1. `scanND` : dynamique d'état, mémoire longue, récurrence causale
+2. `convND` : interaction locale bornée, noyau ND simultané, axes vus ensemble
 
-```math
-K(\mathbf{r}) = \prod_{k=1}^{N} k_k(r_k)
-```
-
-ou, en implementation, une composition de `N` convolutions 1D.
-
-Avantages :
-
-- cout reduit
-- implementation simple
-- bon chemin rapide
-
-Limite :
-
-- les interactions inter-axes sont indirectes
-- le noyau ND n'est pas appris comme une entite unique
-
-### 6.2 Convolution simultanee native
-
-La version simultanee apprend directement :
+La structure générale d'un bloc hybride :
 
 ```math
-K : [0, K-1]^N -> R
+u(n) = ConvND(x)(n)
 ```
-
-ou canal par canal en depthwise :
 
 ```math
-K : [0, K-1]^N x [0, D-1] -> R
+h(n) = Σ_{k=1}^{N} Ā_k(n) · h(n - e_k) + B̄(n) · u(n)
 ```
 
-Cette forme est strictement plus expressive que la separabilite. Elle est la
-bonne primitive si l'on veut que les axes "se voient" dans un meme voisinage
-local ND.
+```math
+y(n) = C(n) · h(n)
+```
+
+Ou, dans une version à deux branches :
+
+```math
+y(n) = Ψ(ScanND(x)(n),\ ConvND(x)(n))
+```
+
+Le point théorique central n'est pas la forme exacte de `Ψ`.
+Le point central est que les deux branches vivent sur la **même topologie causale
+ND** et partagent le **même générateur de wavefront**.
 
 ---
 
-## 7. Le generateur de wavefront ND dans le code
+## 7. Le générateur de wavefront ND dans le code
 
-Le generateur `wavefront_nd_*` expose exactement cette structure :
+Le générateur `wavefront_nd_*` expose exactement cette structure :
 
 - validation des dimensions
 - nombre total de points
 - niveau maximal
 - taille d'un niveau
-- iteration d'un niveau
-- iteration de tous les niveaux
+- itération d'un niveau
+- itération de tous les niveaux
 - offset row-major
 
-La semantique fondamentale est :
+La sémantique fondamentale est :
 
 ```text
 niveau(idx) = idx[0] + idx[1] + ... + idx[ndims-1]
@@ -398,79 +400,108 @@ niveau(idx) = idx[0] + idx[1] + ... + idx[ndims-1]
 et :
 
 ```text
-si les dependances recurrentes vont vers des niveaux < k,
-tous les points du niveau k sont independants
+si les dépendances récurrentes vont vers des niveaux < k,
+tous les points du niveau k sont indépendants
 ```
 
-Ce generateur appartient a `k-mamba`, pas a `optimatrix`, parce qu'il encode
-une topologie causale de modele, pas un simple kernel numerique.
+Ce générateur appartient à `k-mamba` parce qu'il encode une topologie causale
+de modèle, pas un simple kernel numérique.
 
 ---
 
-## 8. Vision K-Mamba
+## 8. Conséquence architecturale
 
-Le "vrai K-Mamba" vise donc deux primitives natives ND partageant le meme
-ordonnancement topologique :
-
-1. `scanND`
-   dynamique d'etat, memoire longue, recurrence causale
-
-2. `convND`
-   interaction locale bornée, noyau ND simultane, axes vus ensemble
-
-La structure generale d'un bloc hybride devient :
-
-```math
-u(\mathbf{n}) = ConvND(x)(\mathbf{n})
-```
-
-```math
-h(\mathbf{n}) =
-\sum_{k=1}^{N} \bar{A}_k(\mathbf{n}) h(\mathbf{n} - \mathbf{e}_k)
-+ \bar{B}(\mathbf{n}) u(\mathbf{n})
-```
-
-```math
-y(\mathbf{n}) = C(\mathbf{n}) h(\mathbf{n})
-```
-
-ou, dans une version a deux branches :
-
-```math
-y(\mathbf{n}) = Psi(ScanND(x)(\mathbf{n}), ConvND(x)(\mathbf{n}))
-```
-
-Le point theorique central n'est pas la forme exacte de `Psi`.
-Le point central est que les deux branches vivent sur la meme topologie causale
-ND et peuvent partager le meme generateur de wavefront.
-
----
-
-## 9. Consequence architecturale
-
-Le generateur de wavefront ND devient la primitive mere.
+Le générateur de wavefront ND devient la **primitive mère**.
 
 Au-dessus :
 
-- `scanND` branche recurrence
-- `convND` branche locale
-- demain `convKD`, operateurs implicites, ou tout autre operateur causal ND
+- `scanND` branche récurrence
+- `convND` branche locale (wavefront parallèle)
+- demain `convKD`, opérateurs implicites, ou tout autre opérateur causal ND
 
 En dessous :
 
-- version C de reference
-- version CPU specialisee
-- version GPU
+- version C de référence (séquentiel)
+- version CPU spécialisée (ASM AVX2)
+- version GPU (CUDA)
 
-La these generale du projet peut alors se formuler proprement :
+La thèse générale du projet peut alors se formuler proprement :
 
-`k-mamba` n'implante pas seulement un `scan2d`, mais une primitive topologique
-universelle pour les operateurs causaux ND sur grille, dont `scanND` et
-`convND` sont deux instances fondamentales.
+`k-mamba` n'implante pas seulement un `scan2d`, mais une **primitive topologique
+universelle pour les opérateurs causaux ND sur grille**, dont `scanND` et
+`convND` sont deux instances fondamentales partageant le même squelette
+d'ordonnancement wavefront.
 
 ---
 
-## References
+## 9. Protocole de validation empirique
+
+**Statut : à réaliser.** Cette section décrit le protocole qui validera
+(ou infirmera) les affirmations théoriques du document.
+
+### 9.1 Configuration expérimentale
+
+**Tâche.** Prédiction de pixel sur images MNIST 28×28 (D=64, M=16).
+
+**Configurations comparées :**
+
+| Approche | Architecture | Dépendances |
+|----------|-------------|-------------|
+| **Baseline** | Flatten 28×28 → 784, scan 1D séquentiel | Chaîne 1D simple |
+| **K-Mamba** | Conv2D + Scan2D wavefront unifié | 2 prédécesseurs simultanés + convolution locale |
+
+### 9.2 Hypothèses falsifiables
+
+**H1 — Parallélisme structurel.**
+
+Sur une grille 28×28, l'implémentation wavefront de `scanND` atteint un
+speedup ≥ 20× sur 28 cœurs par rapport à une implémentation séquentielle
+naïve (parcours row-major).
+
+*Critère d'échec.* Speedup < 20× sur 28 cœurs. Interprétation : le
+parallélisme intra-niveau existe théoriquement mais est annulé par les coûts
+de synchronisation inter-niveaux ou de scheduling. La théorie du parallélisme
+structurel exact reste valide, mais son bénéfice pratique est conditionnel
+à l'overhead d'ordonnancement.
+
+---
+
+**H2 — Qualité de modélisation.**
+
+Un modèle K-Mamba combinant `scanND` et `convND` sur squelette wavefront
+commun atteint une perplexité sur MNIST pixel-prediction inférieure d'au
+moins 10% à un baseline `flatten + scan1D` de même nombre de paramètres.
+
+*Critère d'échec.* PPL baseline ≤ PPL K-Mamba ou écart < 10%. Interprétation :
+la récurrence ND simultanée ne capture pas d'interactions croisées
+supplémentaires par rapport à la composition de scans 1D — ce qui remettrait
+en question l'avantage empirique de la récurrence ND native face à la
+décomposition séquentielle.
+
+---
+
+**H3 — Unification wavefront pour ConvND.**
+
+La convolution dense wavefront (3×3, noyau complet) atteint un temps
+d'inférence comparable (≤ 2×) à une convolution séparable classique sur CPU,
+tout en produisant des feature maps différenciables (norme de la différence
+> ε sur un batch test).
+
+*Critère d'échec.* Facteur > 2× en temps ou feature maps indiscernables.
+Interprétation dans les deux cas : soit l'unification wavefront est trop
+coûteuse pour ConvND dense, soit la densité du noyau n'apporte pas
+d'information supplémentaire mesurable — dans les deux cas, l'argument
+d'unification est affaibli empiriquement.
+
+### 9.3 Interprétation globale
+
+L'échec simultané de H1 et H2 invaliderait la thèse centrale du document.
+L'échec de H3 seul affaiblirait l'unification ConvND/ScanND sans remettre
+en cause la théorie du scan ND simultané.
+
+---
+
+## Références
 
 - Gu and Dao (2023). Mamba: Linear-Time Sequence Modeling with Selective State Spaces.
 - Liu et al. (2024). VMamba: Visual State Space Models.
