@@ -8,7 +8,7 @@ Ce projet formule une théorie des **systèmes causaux multi-dimensionnels sur g
 
 **Pilier I : Topologie causale comme primitive fondatrice**
 
-Le niveau wavefront ND, défini par `l(n) = Σ n_i`, constitue l'ordonnancement topologique universel pour tout opérateur causal sur grille N-dimensionnelle. Ce n'est pas une heuristique d'implémentation mais une propriété structurelle du DAG causal sous-jacent.
+Le niveau wavefront ND, défini par $l(n) = Σ n_i$, constitue l'ordonnancement topologique universel pour tout opérateur causal sur grille N-dimensionnelle. Ce n'est pas une heuristique d'implémentation mais une propriété structurelle du DAG causal sous-jacent.
 
 **Pilier II : Unification des opérateurs via le squelette topologique**
 
@@ -30,9 +30,9 @@ Séparation philosophique entre intention (logique modèle, orchestration dans k
 
 Contrairement à l'état de l'art (VMamba, Mamba-ND) qui décompose la dimensionnalité en scans 1D séquentiels, cette théorie propose deux innovations majeures :
 
-**1. Récurrence ND simultanée.** La récurrence native `h(n) = Σ A_k·h(n-e_k) + B(n)·x(n)` remplace les compositions de scans 1D.
+**1. Récurrence ND simultanée.** La récurrence native $h(n) = Σ A_k·h(n-e_k) + B(n)·x(n)$ remplace les compositions de scans 1D.
 
-**2. Convolution ND unifiée par wavefront.** La convolution dense `z(n) = Σ K(r)·x(n-r)` partage le même squelette topologique wavefront que le scan, avec parallélisme intra-niveau. Cette unification théorique remplace les approches séparables ou séquentielles traditionnelles.
+**2. Convolution ND unifiée par wavefront.** La convolution dense $z(n) = Σ K(r)·x(n-r)$ partage le même squelette topologique wavefront que le scan, avec parallélisme intra-niveau. Cette unification théorique remplace les approches séparables ou séquentielles traditionnelles.
 
 Le wavefront devient la **primitive mère** partagée par tous les opérateurs causaux ND.
 
@@ -40,23 +40,23 @@ Le wavefront devient la **primitive mère** partagée par tous les opérateurs c
 
 **Théorème (Classe des opérateurs causaux wavefront-exécutables).**
 
-Soit `O` un opérateur sur grille ND régulière `G = [0,d₁)×⋯×[0,dₙ)`. Les propositions suivantes sont équivalentes :
+Soit $O$ un opérateur sur grille ND régulière $G = [0,d₁)×⋯×[0,dₙ)$. Les propositions suivantes sont équivalentes :
 
-**(i)** `O` est exécutable par parcours wavefront niveau par niveau, avec parallélisme intra-niveau exact.
+**(i)** $O$ est exécutable par parcours wavefront niveau par niveau, avec parallélisme intra-niveau exact.
 
-**(ii)** Le graphe de dépendances de `O` est un sous-graphe du DAG causal défini par l'ordre partiel `m ≺ n` ssi `l(m) < l(n)`.
+**(ii)** Le graphe de dépendances de $O$ est un sous-graphe du DAG causal défini par l'ordre partiel $m ≺ n$ ssi $l(m) < l(n)$.
 
-**(iii)** Pour tout point `n`, les dépendances de `O` ne pointent que vers des points de niveau strictement inférieur (`l(m) < l(n)`), et il n'existe pas de dépendances entre points d'un même niveau.
+**(iii)** Pour tout point $n$, les dépendances de $O$ ne pointent que vers des points de niveau strictement inférieur ($l(m) < l(n)$), et il n'existe pas de dépendances entre points d'un même niveau.
 
 **Preuve.**
 
-*(i) ⇒ (ii)* : Par construction du parcours wavefront, tout point `n` au niveau `s` n'est calculé qu'après tous les niveaux `< s`. Donc toute dépendance de `n` pointe nécessairement vers un niveau strictement inférieur. Le graphe de dépendances est bien un sous-graphe du DAG causal défini par `l(m) < l(n)`. ∎
+*(i) ⇒ (ii)* : Par construction du parcours wavefront, tout point $n$ au niveau $s$ n'est calculé qu'après tous les niveaux $< s$. Donc toute dépendance de $n$ pointe nécessairement vers un niveau strictement inférieur. Le graphe de dépendances est bien un sous-graphe du DAG causal défini par $l(m) < l(n)$. ∎
 
-*(ii) ⇒ (iii)* : Immédiat. Si le graphe de dépendances est un sous-graphe du DAG `l(m) < l(n)`, alors (a) toute dépendance pointe vers un niveau strictement inférieur, et (b) deux points du même niveau `s` ne peuvent être liés car cela contredirait `l(m) < l(n)` avec `l(m) = l(n) = s`. ∎
+*(ii) ⇒ (iii)* : Immédiat. Si le graphe de dépendances est un sous-graphe du DAG $l(m) < l(n)$, alors (a) toute dépendance pointe vers un niveau strictement inférieur, et (b) deux points du même niveau $s$ ne peuvent être liés car cela contredirait $l(m) < l(n)$ avec $l(m) = l(n) = s$. ∎
 
 *(iii) ⇒ (i)* : Construisons le parcours wavefront et montrons qu'il est correct.
 
-- **Initialisation.** Le niveau `0` contient uniquement l'origine `0`. Ce point n'a aucun prédécesseur dans la grille (`n - e_k` serait hors domaine pour tout `k`). Il est calculable sans dépendance. ✓
+- **Initialisation.** Le niveau `0` contient uniquement l'origine $0$. Ce point n'a aucun prédécesseur dans la grille ($n - e_k$ serait hors domaine pour tout $k$). Il est calculable sans dépendance. ✓
 
 - **Hérédité.** Supposons que tous les niveaux `0, 1, …, s-1` ont été calculés correctement. Soit `n` un point du niveau `s`, i.e. `l(n) = s`. Par (iii), toute dépendance de `n` pointe vers un point `m` avec `l(m) < s`. Donc `m` appartient à un niveau déjà calculé. La valeur `O[n]` est donc calculable. ✓
 
