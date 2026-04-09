@@ -40,4 +40,15 @@ void convnd_backward_wavefront(ConvNDParams *p, const KMWavefrontPlan *plan);
 /* Unified entry point */
 void convnd(ConvNDParams *p, ConvNDMode mode);
 
+/* ============================================================================
+ * CUDA Backend (optional — compile with nvcc)
+ * ============================================================================ */
+#ifdef __CUDACC__
+/* Forward pass on GPU. Returns 0 on success, -1 on error. */
+int om_convnd_forward(ConvNDParams *p);
+
+/* Backward pass on GPU. Returns 0 on success, -1 on error. */
+int om_convnd_backward(ConvNDParams *p);
+#endif
+
 #endif

@@ -6,6 +6,7 @@
 #include "scan.h"
 #include "wavefront_plan.h"
 #include "km_topology.h"
+#include "kmamba_cuda_utils.h"
 
 int scannd_validate(const ScanNDParams *p) {
     long total_points;
@@ -122,6 +123,27 @@ int scannd_ref(ScanNDParams *p) {
 int scannd(ScanNDParams *p) {
     if (!scannd_validate(p)) return -1;
 
+    /* Initialize backend on first call */
+    static int backend_initialized = 0;
+    if (!backend_initialized) {
+        kmamba_backend_init();
+        backend_initialized = 1;
+    }
+
+    /* Automatic GPU dispatch if available */
+    KMambaBackend backend = kmamba_backend_select();
+
+#ifdef KMAMBA_BUILD_CUDA
+    if (backend == KMAMBA_BACKEND_GPU) {
+        /* Try GPU implementation first */
+        if (om_scannd_forward(p) == 0) {
+            return 0; /* GPU success */
+        }
+        /* Fall back to CPU on GPU failure */
+    }
+#endif
+
+    /* CPU implementation - optimized paths for common dimensions */
     if (p->ndims == 1) {
         ScanParams p1 = {
             .x = (float *)p->x,

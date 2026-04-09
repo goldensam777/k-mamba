@@ -22,6 +22,7 @@
 #include "wavefront_plan.h"
 #include "km_topology.h"
 #include "convnd.h"
+#include "kmamba_cuda_utils.h"
 
 /* ============================================================
  * Helpers
@@ -201,7 +202,7 @@ void convnd_backward_wavefront(ConvNDParams *p, const KMWavefrontPlan *plan) {
 }
 
 /* ============================================================
- * Entry point unifié
+ * Entry point unifié — avec dispatch automatique GPU
  * ============================================================ */
 
 void convnd(ConvNDParams *p, ConvNDMode mode) {
@@ -209,6 +210,32 @@ void convnd(ConvNDParams *p, ConvNDMode mode) {
 
     if (!p || !p->dims || p->ndims <= 0) return;
 
+    /* Initialize backend on first call */
+    static int backend_initialized = 0;
+    if (!backend_initialized) {
+        kmamba_backend_init();
+        backend_initialized = 1;
+    }
+
+    /* Automatic GPU dispatch if available */
+    KMambaBackend backend = kmamba_backend_select();
+
+#ifdef KMAMBA_BUILD_CUDA
+    if (backend == KMAMBA_BACKEND_GPU) {
+        /* Try GPU first */
+        int gpu_ok = 1;
+        if (mode & CONVND_FORWARD) {
+            if (om_convnd_forward(p) != 0) gpu_ok = 0;
+        }
+        if (gpu_ok && (mode & CONVND_BACKWARD)) {
+            if (om_convnd_backward(p) != 0) gpu_ok = 0;
+        }
+        if (gpu_ok) return; /* GPU success */
+        /* Fall back to CPU on GPU failure */
+    }
+#endif
+
+    /* CPU implementation */
     plan = km_wavefront_plan_create(p->dims, p->ndims);
     if (!plan) return;
 

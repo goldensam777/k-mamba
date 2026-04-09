@@ -10,6 +10,7 @@
 #include "wavefront_plan.h"
 #include "wavefront_nd.h"
 #include "kmamba_kernels.h"
+#include "kmamba_cuda_utils.h"
 
 /* ============================================================================
  * Basic Matrix type
