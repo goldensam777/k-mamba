@@ -150,3 +150,104 @@ float loss = kmamba_train_step(m, tokens_plus1);
 **YEVI Mawuli Peniel Samuel** — IFRI-UAC (Bénin)
 
 Devise : **"Ego Sum Optimus Optimus"**
+
+---
+
+## Journal des Sessions
+
+### Session 10 Avril 2026 — Implémentation du Modèle Hybrid CPU/GPU
+
+**Objectif** : Créer un modèle hybride où embedding/head tournent sur CPU et les blocs Mamba sur GPU.
+
+**Travail effectué** :
+
+1. **Renommage des kernels CUDA** (`cuda/mamba_block.cu`)
+   - Éviter conflits de symboles avec version CPU (`mamba_block.c`)
+   - `silu_fwd_kernel` → `cuda_silu_fwd_kernel`
+   - `sigmoid_fwd_kernel` → `cuda_sigmoid_fwd_kernel`
+   - `add_inplace_kernel` → `cuda_add_inplace_kernel`
+   - `gpu_block_forward` → `cuda_block_forward`
+   - `gpu_block_backward` → `cuda_block_backward`
+
+2. **Implémentation `kmamba_train_batch_hybrid`** (`src/kmamba.c`)
+   - Embedding lookup sur CPU
+   - Upload vers GPU via `cudaMemcpy`
+   - Forward des blocs Mamba sur GPU via `hybrid_block_forward`
+   - Download activations cachées vers CPU
+   - Head GEMM et calcul de loss sur CPU
+   - Backward des blocs sur GPU via `hybrid_block_backward`
+   - Accumulation des gradients sur CPU
+   - Optimizer step CPU pour embedding/head
+
+3. **Création des wrappers** (`src/kmamba.c`)
+   - `hybrid_block_forward()` : alloue paramètres GPU, appelle `cuda_block_forward`, libère
+   - `hybrid_block_backward()` : alloue paramètres + gradients GPU, appelle `cuda_block_backward`, accumulate CPU
+   - `gpu_param_alloc()` : helper allocation + upload
+   - `get_cublas_handle()` : initialise handle cuBLAS avec workspace 16MB
+
+4. **Mise à jour `models/kmamba_hybrid.c`**
+   - Utilise `kmamba_train_batch_hybrid()` au lieu de `kmamba_train_batch()`
+   - Correction du backend GPU pour les blocs
+
+5. **Implémentation `gpu_optimizer_step`** (`cuda/mamba_block.cu`)
+   - Download gradients GPU vers CPU
+   - Application AdamW/MUON sur CPU
+   - Upload paramètres mis à jour vers GPU
+
+6. **Fix compilation**
+   - Casts `(void**)` pour `cudaMalloc`
+   - Déclarations `extern "C"` pour linkage C/CUDA
+   - Inclusion `<cublas_v2.h>` dans `src/kmamba.c`
+
+7. **Debug cuBLAS error 13** (non résolu)
+   - Erreur `CUBLAS_STATUS_ALLOC_FAILED` à la ligne 62 de `mamba_block.cu`
+   - Tentatives : `cudaSetDevice(0)`, `cudaFree(0)`, workspace 16MB, vérifications pointeurs
+   - Build réussi mais erreur runtime persiste
+   - Hypothèse : problème de version CUDA/cuBLAS ou mémoire GPU insuffisante
+
+**Fichiers modifiés** :
+- `cuda/mamba_block.cu` — Renommage kernels, ajout `gpu_optimizer_step`, vérifications
+- `src/kmamba.c` — Implémentation complète training hybrid
+- `models/kmamba_hybrid.c` — Appel fonction hybrid
+
+**État** : Compilation OK. Exécution échoue sur cuBLAS error 13. À investiguer plus profondément (versions CUDA, mémoire, ou abandonner cuBLAS pour kernels CPU).
+
+### Session 10 Avril 2026 (soir) — Scripts Cloud Training
+
+**Objectif** : Créer scripts pour entraînement sur Kaggle et Google Colab (GPU cloud gratuit).
+
+**Travail effectué** :
+
+1. **Scripts Kaggle** (`kaggle/`)
+   - `kmamba_kaggle_500M.ipynb` — Notebook complet 500M params
+   - `setup_kaggle.sh` — Script setup avec Rust + build
+   - `README.md` — Instructions Kaggle
+   - `train_kaggle.py` — Script Python d'entraînement
+
+2. **Scripts Google Colab** (`colab/`)
+   - `kmamba_colab_500M.ipynb` — Notebook Colab 500M params
+   - `setup_colab.sh` — Script setup Colab
+   - `README.md` — Instructions Colab (upload Drive, download, etc.)
+
+3. **Configuration 500M params** (pour cloud)
+   - VOCAB=32K, DIM=1024, STATE=2048, LAYERS=24, SEQ=1024
+   - BATCH_SIZE=4 (limite T4 16GB)
+   - Tokenizer BPE Rust intégré dans les scripts
+
+**Features** :
+- Installation auto Rust/cargo pour tokenizer
+- Build k-mamba CUDA avec make
+- Visualisation matplotlib des losses
+- Sauvegarde checkpoints (Kaggle: /output/, Colab: download/Drive)
+- Chinchilla scaling configurable
+
+**Fichiers créés** :
+- `kaggle/kmamba_kaggle_500M.ipynb`
+- `kaggle/setup_kaggle.sh`
+- `kaggle/README.md`
+- `kaggle/train_kaggle.py`
+- `colab/kmamba_colab_500M.ipynb`
+- `colab/setup_colab.sh`
+- `colab/README.md`
+
+**État** : ✅ Scripts prêts pour upload sur GitHub et utilisation cloud
