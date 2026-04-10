@@ -153,9 +153,9 @@ endif
 $(TARGET): $(OBJS) $(ASM_OBJS) $(CUDA_OBJS)
 	ar rcs $@ $^
 
-# C files
+# C files (always use gcc, not nvcc)
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	gcc $(CFLAGS) -c $< -o $@
 
 # ASM files
 %.o: %.asm
