@@ -2,7 +2,13 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#include "km_memory_pool.h"
 #include "scan.h"
 #include "wavefront_plan.h"
 #include "km_topology.h"
@@ -33,51 +39,58 @@ int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan) {
     total_points = plan->total_points;
     if (total_points <= 0) return -1;
 
-    strides = (long *)malloc((size_t)p->ndims * sizeof(long));
-    idx = (long *)malloc((size_t)p->ndims * sizeof(long));
+    /* Utilise memory pool thread-local pour éviter malloc répété */
+    KMMemoryPool *pool = km_memory_pool_threadlocal();
+    strides = (long *)km_pool_alloc(pool, (size_t)p->ndims * sizeof(long));
+    idx = (long *)km_pool_alloc(pool, (size_t)p->ndims * sizeof(long));
     if (!strides || !idx) {
-        free(strides);
-        free(idx);
+        km_pool_free(pool, strides);
+        km_pool_free(pool, idx);
         return -1;
     }
     if (!km_make_row_major_strides(p->dims, p->ndims, strides)) {
-        free(strides);
-        free(idx);
+        km_pool_free(pool, strides);
+        km_pool_free(pool, idx);
         return -1;
     }
 
-    /* Mamba-3: Allocate buffers for exp-trapezoidal state */
+    /* Mamba-3: Allocate buffers for exp-trapezoidal state via pool */
     float *h_rot = NULL, *Bu_prev = NULL, *Bu_cur = NULL;
     if (p->lambda) {
         /* Per-state-elem buffers for R(θ) rotation and Bu tracking */
-        h_rot = (float *)malloc((size_t)p->D * p->M * sizeof(float));
-        Bu_prev = (float *)calloc((size_t)total_points * p->D * p->M, sizeof(float));
-        Bu_cur = (float *)malloc((size_t)p->D * p->M * sizeof(float));
+        h_rot = (float *)km_pool_alloc(pool, (size_t)p->D * p->M * sizeof(float));
+        /* Note: calloc pas supporté par pool, on alloue puis memset */
+        Bu_prev = (float *)km_pool_alloc(pool, (size_t)total_points * p->D * p->M * sizeof(float));
+        Bu_cur = (float *)km_pool_alloc(pool, (size_t)p->D * p->M * sizeof(float));
         if (!h_rot || !Bu_prev || !Bu_cur) {
-            free(strides); free(idx); free(h_rot); free(Bu_prev); free(Bu_cur);
+            km_pool_free(pool, strides); km_pool_free(pool, idx); 
+            km_pool_free(pool, h_rot); km_pool_free(pool, Bu_prev); km_pool_free(pool, Bu_cur);
             return -1;
         }
+        /* Zero Bu_prev */
+        memset(Bu_prev, 0, (size_t)total_points * p->D * p->M * sizeof(float));
     }
 
     for (long level = 0; level <= plan->max_level; level++) {
         const long *level_offsets = km_wavefront_plan_level_offsets(plan, level);
         long level_size = km_wavefront_plan_level_size(plan, level);
         if (!level_offsets || level_size < 0) {
-            free(strides);
-            free(idx);
-            free(h_rot); free(Bu_prev); free(Bu_cur);
+            km_pool_free(pool, strides);
+            km_pool_free(pool, idx);
+            km_pool_free(pool, h_rot); km_pool_free(pool, Bu_prev); km_pool_free(pool, Bu_cur);
             return -1;
         }
 
+        /* Wavefront: tous les points d'un niveau sont indépendants → parallélisme */
+        int level_error = 0;
+        #pragma omp parallel for
         for (long point = 0; point < level_size; point++) {
             long offset = level_offsets[point];
 
             if (offset < 0 || offset >= total_points) {
-                free(strides);
-                free(idx);
-                free(h_rot); free(Bu_prev); free(Bu_cur);
-                return -1;
+                level_error = 1;
             }
+            if (level_error) continue;
 
             km_unravel_index(offset, p->dims, strides, p->ndims, idx);
 
@@ -201,13 +214,21 @@ int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan) {
                 }
             }
         }
+        /* Vérification erreur après la boucle parallèle */
+        if (level_error) {
+            km_pool_free(pool, strides);
+            km_pool_free(pool, idx);
+            km_pool_free(pool, h_rot); km_pool_free(pool, Bu_prev); km_pool_free(pool, Bu_cur);
+            return -1;
+        }
     }
 
-    free(strides);
-    free(idx);
-    free(h_rot);
-    free(Bu_prev);
-    free(Bu_cur);
+    /* Libère vers le pool pour réutilisation (pas de free système) */
+    km_pool_free(pool, strides);
+    km_pool_free(pool, idx);
+    km_pool_free(pool, h_rot);
+    km_pool_free(pool, Bu_prev);
+    km_pool_free(pool, Bu_cur);
     return 0;
 }
 

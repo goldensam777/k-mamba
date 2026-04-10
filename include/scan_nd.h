@@ -66,7 +66,7 @@ int scannd_ref_with_plan(ScanNDParams *p, const KMWavefrontPlan *plan);
 /* Alias courant vers l'implémentation de référence. */
 int scannd(ScanNDParams *p);
 
-#ifdef __CUDACC__
+#ifdef KMAMBA_BUILD_CUDA
 /* Backend CUDA générique piloté par wavefronts. Les pointeurs x/A/B/C/delta/h/y
  * doivent être des device pointers ; dims reste côté hôte. */
 int om_scannd_forward(ScanNDParams *p);

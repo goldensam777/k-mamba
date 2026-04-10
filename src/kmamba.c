@@ -30,13 +30,25 @@ static void xavier_uniform(float *w, size_t fan_in, size_t fan_out, size_t n) {
 /* Softmax inline: probs[i] = exp(x[i]) / sum(exp(x)) */
 static inline void softmax_f32(const float *x, float *probs, int rows, int cols) {
     (void)rows;
+    if (cols <= 0) return;
+    
     float max_val = x[0];
-    for (int i = 1; i < cols; i++) if (x[i] > max_val) max_val = x[i];
+    for (int i = 1; i < cols; i++) {
+        if (x[i] > max_val && !isnan(x[i]) && !isinf(x[i])) max_val = x[i];
+    }
+    /* Protection contre max_val invalide */
+    if (isnan(max_val) || isinf(max_val)) max_val = 0.0f;
+    
     float sum = 0.0f;
     for (int i = 0; i < cols; i++) {
-        probs[i] = expf(x[i] - max_val);
-        sum += probs[i];
+        float exp_val = expf(fmaxf(x[i] - max_val, -80.0f)); /* clamp pour éviter underflow */
+        probs[i] = exp_val;
+        sum += exp_val;
     }
+    
+    /* Protection division par zéro */
+    if (sum < 1e-20f) sum = 1e-20f;
+    
     float inv_sum = 1.0f / sum;
     for (int i = 0; i < cols; i++) probs[i] *= inv_sum;
 }
@@ -72,10 +84,18 @@ static inline void gemm_f32_AtB(const float *A, const float *B, float *C,
 
 /* ========= embedding ========= */
 
-static void embed_lookup(const KMamba *m, float *out, const uint8_t *tokens) {
+static void embed_lookup(const KMamba *m, float *out, const uint32_t *tokens) {
     size_t D = m->cfg.dim;
-    for (size_t t = 0; t < m->cfg.seq_len; t++)
-        memcpy(&out[t * D], &m->embedding[(size_t)tokens[t] * D], D * sizeof(float));
+    size_t V = m->cfg.vocab_size;
+    for (size_t t = 0; t < m->cfg.seq_len; t++) {
+        uint32_t tok_id = tokens[t];
+        if (tok_id < V) {
+            memcpy(&out[t * D], &m->embedding[(size_t)tok_id * D], D * sizeof(float));
+        } else {
+            /* Out-of-vocab: zero embedding */
+            memset(&out[t * D], 0, D * sizeof(float));
+        }
+    }
 }
 
 /* ========= create / free ========= */
@@ -101,7 +121,12 @@ KMamba* kmamba_create(const KMambaConfig *cfg) {
     }
 
     m->embedding = (float *)xcalloc(m->cfg.vocab_size * m->cfg.dim, sizeof(float));
-    m->head      = (float *)xcalloc(m->cfg.dim * m->cfg.vocab_size, sizeof(float));
+    /* Weight tying: head partage les poids avec embedding */
+    if (m->cfg.weight_tying) {
+        m->head = m->embedding;  /* Partage mémoire */
+    } else {
+        m->head = (float *)xcalloc(m->cfg.dim * m->cfg.vocab_size, sizeof(float));
+    }
 
     m->layers = (MambaBlock **)calloc(m->cfg.n_layers, sizeof(MambaBlock *));
     for (size_t i = 0; i < m->cfg.n_layers; i++) {
@@ -138,7 +163,10 @@ void kmamba_free(KMamba *m) {
         free(m->layers);
     }
     free(m->embedding);
-    free(m->head);
+    /* Éviter double-free si weight_tying */
+    if (!m->cfg.weight_tying) {
+        free(m->head);
+    }
     free(m->m_embedding);
     free(m->v_embedding);
     free(m->m_head);
@@ -150,7 +178,10 @@ int kmamba_init(KMamba *m, uint32_t seed) {
     if (!m) return -1;
     srand((unsigned)seed);
     xavier_uniform(m->embedding, m->cfg.vocab_size, m->cfg.dim, m->cfg.vocab_size * m->cfg.dim);
-    xavier_uniform(m->head, m->cfg.dim, m->cfg.vocab_size, m->cfg.dim * m->cfg.vocab_size);
+    /* Si pas de weight tying, initialiser head séparément */
+    if (!m->cfg.weight_tying) {
+        xavier_uniform(m->head, m->cfg.dim, m->cfg.vocab_size, m->cfg.dim * m->cfg.vocab_size);
+    }
     for (size_t i = 0; i < m->cfg.n_layers; i++)
         mamba_block_init(m->layers[i]);
     return 0;
@@ -310,7 +341,7 @@ KMamba* kmamba_load(const char *path, int for_training,
 
 /* ========= forward ========= */
 
-int kmamba_forward(KMamba *m, const uint8_t *tokens, float *logits_out) {
+int kmamba_forward(KMamba *m, const uint32_t *tokens, float *logits_out) {
     if (!m || !tokens || !logits_out) return -1;
 
     size_t L = m->cfg.seq_len;
@@ -343,15 +374,15 @@ int kmamba_forward(KMamba *m, const uint8_t *tokens, float *logits_out) {
 
 /* ========= training ========= */
 
-float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
+float kmamba_train_step(KMamba *m, const uint32_t *tokens_plus1) {
     if (!m || !tokens_plus1 || !m->for_training) return NAN;
 
     size_t V = m->cfg.vocab_size;
     size_t L = m->cfg.seq_len;
     size_t D = m->cfg.dim;
 
-    const uint8_t *tokens_in  = tokens_plus1;
-    const uint8_t *tokens_tgt = tokens_plus1 + 1;
+    const uint32_t *tokens_in  = tokens_plus1;
+    const uint32_t *tokens_tgt = tokens_plus1 + 1;
 
     float *acts    = (float *)xcalloc((m->cfg.n_layers + 1) * L * D, sizeof(float));
     float *d_hidden = (float *)xcalloc(L * D, sizeof(float));
@@ -434,7 +465,7 @@ float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1) {
     return loss;
 }
 
-float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_size) {
+float kmamba_train_batch(KMamba *m, const uint32_t *batch_tokens, size_t batch_size) {
     if (!m || !batch_tokens || !m->for_training || batch_size == 0) return NAN;
 
     size_t V = m->cfg.vocab_size;
@@ -498,9 +529,9 @@ float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_si
 
 #pragma omp for schedule(dynamic)
         for (size_t b = 0; b < batch_size; b++) {
-            const uint8_t *seq     = &batch_tokens[b * Lp1];
-            const uint8_t *tok_in  = seq;
-            const uint8_t *tok_tgt = seq + 1;
+            const uint32_t *seq     = &batch_tokens[b * Lp1];
+            const uint32_t *tok_in  = seq;
+            const uint32_t *tok_tgt = seq + 1;
 
             embed_lookup(m, &acts[0], tok_in);
             for (size_t i = 0; i < n_layers; i++) {
@@ -659,7 +690,7 @@ void kmamba_gpu_sync_to_host(KMamba *m) {
 }
 
 /* Single training step on GPU (simplified: no batching, single sequence) */
-float kmamba_train_step_gpu(KMamba *m, const uint8_t *tokens_plus1) {
+float kmamba_train_step_gpu(KMamba *m, const uint32_t *tokens_plus1) {
     if (!m || !m->for_training || !tokens_plus1) return 0.0f;
     if (!m->gpu.gpu_ready) {
         if (kmamba_gpu_init(m) != 0) return 0.0f;
@@ -671,19 +702,19 @@ float kmamba_train_step_gpu(KMamba *m, const uint8_t *tokens_plus1) {
     size_t D = m->cfg.dim;
     size_t n_layers = m->cfg.n_layers;
 
-    const uint8_t *tok_in = tokens_plus1;
-    const uint8_t *tok_tgt = tokens_plus1 + 1;
+    const uint32_t *tok_in = tokens_plus1;
+    const uint32_t *tok_tgt = tokens_plus1 + 1;
 
     /* Allocate device buffers */
     float *d_acts = NULL, *d_logits = NULL, *d_probs = NULL, *d_dlogits = NULL;
     float *d_dhidden = NULL, *d_dbuf = NULL, *d_dembed = NULL;
-    cudaMalloc(&d_acts, (n_layers + 1) * L * D * sizeof(float));
-    cudaMalloc(&d_logits, L * V * sizeof(float));
-    cudaMalloc(&d_probs, V * sizeof(float));
-    cudaMalloc(&d_dlogits, L * V * sizeof(float));
-    cudaMalloc(&d_dhidden, L * D * sizeof(float));
-    cudaMalloc(&d_dbuf, L * D * sizeof(float));
-    cudaMalloc(&d_dembed, V * D * sizeof(float));
+    cudaMalloc((void**)&d_acts, (n_layers + 1) * L * D * sizeof(float));
+    cudaMalloc((void**)&d_logits, L * V * sizeof(float));
+    cudaMalloc((void**)&d_probs, V * sizeof(float));
+    cudaMalloc((void**)&d_dlogits, L * V * sizeof(float));
+    cudaMalloc((void**)&d_dhidden, L * D * sizeof(float));
+    cudaMalloc((void**)&d_dbuf, L * D * sizeof(float));
+    cudaMalloc((void**)&d_dembed, V * D * sizeof(float));
     cudaMemset(d_dembed, 0, V * D * sizeof(float));
 
     /* Embedding lookup on GPU: d_acts[0] = d_embedding[tok_in] */
@@ -808,4 +839,402 @@ float kmamba_train_step_gpu(KMamba *m, const uint8_t *tokens_plus1) {
     return sample_loss / (float)L;
 }
 
+/* ============================================================
+ * Hybrid batch training: embedding/head on CPU, blocks on GPU
+ * ============================================================ */
+
+#ifdef KMAMBA_BUILD_CUDA
+#include <cublas_v2.h>
+
+/* Déclaration externe de gpu_optimizer_step depuis cuda/mamba_block.cu */
+#ifdef __cplusplus
+extern "C" {
+#endif
+void gpu_optimizer_step(MambaBlock *block, const MBOptimConfig *conf);
+#ifdef __cplusplus
+}
+#endif
+
+/* Global cuBLAS handle for hybrid mode */
+static cublasHandle_t g_cublas_handle = NULL;
+static int g_cublas_initialized = 0;
+
+static cublasHandle_t get_cublas_handle(void) {
+    if (!g_cublas_initialized) {
+        /* Initialize CUDA device and context first */
+        cudaError_t cuda_err = cudaSetDevice(0);
+        if (cuda_err != cudaSuccess) {
+            fprintf(stderr, "[CUDA] Failed to set device: %s\n", cudaGetErrorString(cuda_err));
+            return NULL;
+        }
+        cuda_err = cudaFree(0);  /* Initialize context */
+        if (cuda_err != cudaSuccess) {
+            fprintf(stderr, "[CUDA] Failed to initialize context: %s\n", cudaGetErrorString(cuda_err));
+            return NULL;
+        }
+        cublasStatus_t status = cublasCreate(&g_cublas_handle);
+        if (status != CUBLAS_STATUS_SUCCESS) {
+            fprintf(stderr, "[cuBLAS] Failed to create handle: %d\n", (int)status);
+            return NULL;
+        }
+        /* Set cuBLAS workspace to avoid allocation failures */
+        void *workspace;
+        cudaMalloc(&workspace, 1024 * 1024 * 16);  /* 16MB workspace */
+        cublasSetWorkspace(g_cublas_handle, workspace, 1024 * 1024 * 16);
+        g_cublas_initialized = 1;
+        fprintf(stderr, "[cuBLAS] Handle initialized successfully with 16MB workspace\n");
+    }
+    return g_cublas_handle;
+}
+
+/* Helper: allocate and copy param to GPU */
+static float* gpu_param_alloc(const float *host_data, size_t n) {
+    float *d_param;
+    cudaMalloc((void**)&d_param, n * sizeof(float));
+    cudaMemcpy(d_param, host_data, n * sizeof(float), cudaMemcpyHostToDevice);
+    return d_param;
+}
+
+/* Wrapper: convert MambaBlock pointers to device pointers for cuda_block_forward */
+static void hybrid_block_forward(MambaBlock *block, float *d_output, float *d_input, int L, int B) {
+    cublasHandle_t handle = get_cublas_handle();
+    if (!handle) return;
+    size_t D = block->config.dim;
+    size_t N = block->config.state_size;
+    size_t R = block->config.mimo_rank > 0 ? block->config.mimo_rank : 1;
+    size_t NR = N * R;
+    size_t TS = D / 2;
+    
+    /* Allocate param buffers on GPU and copy from host */
+    float *d_W_in = gpu_param_alloc(block->W_in.data, R * D);
+    float *d_W_out = gpu_param_alloc(block->W_out.data, D * R);
+    float *d_A_log = gpu_param_alloc(block->A_log.data, N);
+    float *d_W_B = gpu_param_alloc(block->W_B.data, NR * D);
+    float *d_W_C = gpu_param_alloc(block->W_C.data, NR * D);
+    float *d_delta_proj = gpu_param_alloc(block->delta_proj.data, D);
+    float *d_theta = block->theta ? gpu_param_alloc(block->theta, TS) : NULL;
+    float *d_lambda_proj = gpu_param_alloc(block->lambda_proj.data, D);
+    
+    /* Allocate temp buffers */
+    float *d_u_raw, *d_u, *d_dt_raw, *d_dt, *d_B_exp, *d_C_exp, *d_h_store, *d_y_scan, *d_y_proj;
+    float *d_lambda_raw, *d_lambda;
+    cudaMalloc((void**)&d_u_raw, L * R * sizeof(float));
+    cudaMalloc((void**)&d_u, L * R * sizeof(float));
+    cudaMalloc((void**)&d_dt_raw, L * sizeof(float));
+    cudaMalloc((void**)&d_dt, L * sizeof(float));
+    cudaMalloc((void**)&d_B_exp, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_C_exp, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_h_store, L * R * sizeof(float));
+    cudaMalloc((void**)&d_y_scan, L * R * sizeof(float));
+    cudaMalloc((void**)&d_y_proj, L * D * sizeof(float));
+    cudaMalloc((void**)&d_lambda_raw, L * sizeof(float));
+    cudaMalloc((void**)&d_lambda, L * sizeof(float));
+    
+    cuda_block_forward(handle, d_W_in, d_W_out, d_A_log, d_W_B, d_W_C, d_delta_proj, d_theta,
+                       d_lambda_proj, d_input, d_output, d_u_raw, d_u, d_dt_raw, d_dt,
+                       d_B_exp, d_C_exp, d_lambda_raw, d_lambda, d_h_store, d_y_scan, d_y_proj,
+                       L, (int)N, (int)D, (int)R);
+    
+    /* Free params */
+    cudaFree(d_W_in); cudaFree(d_W_out); cudaFree(d_A_log);
+    cudaFree(d_W_B); cudaFree(d_W_C); cudaFree(d_delta_proj);
+    if (d_theta) cudaFree(d_theta);
+    cudaFree(d_lambda_proj);
+    
+    /* Free temp buffers */
+    cudaFree(d_u_raw); cudaFree(d_u); cudaFree(d_dt_raw); cudaFree(d_dt);
+    cudaFree(d_B_exp); cudaFree(d_C_exp); cudaFree(d_h_store); cudaFree(d_y_scan);
+    cudaFree(d_y_proj); cudaFree(d_lambda_raw); cudaFree(d_lambda);
+}
+
+static void hybrid_block_backward(MambaBlock *block, float *d_doutput, float *d_dinput,
+                                   float *d_x, int L, int B) {
+    cublasHandle_t handle = get_cublas_handle();
+    if (!handle) return;
+    size_t D = block->config.dim;
+    size_t N = block->config.state_size;
+    size_t R = block->config.mimo_rank > 0 ? block->config.mimo_rank : 1;
+    size_t NR = N * R;
+    size_t TS = D / 2;
+
+    MBOptimState *s = (MBOptimState *)block->opt_state;
+    if (!s) return;
+
+    /* Allocate param buffers on GPU */
+    float *d_W_in = gpu_param_alloc(block->W_in.data, R * D);
+    float *d_W_out = gpu_param_alloc(block->W_out.data, D * R);
+    float *d_A_log = gpu_param_alloc(block->A_log.data, N);
+    float *d_W_B = gpu_param_alloc(block->W_B.data, NR * D);
+    float *d_W_C = gpu_param_alloc(block->W_C.data, NR * D);
+    float *d_delta_proj = gpu_param_alloc(block->delta_proj.data, D);
+    float *d_theta = block->theta ? gpu_param_alloc(block->theta, TS) : NULL;
+    float *d_lambda_proj = gpu_param_alloc(block->lambda_proj.data, D);
+
+    /* Allocate temp buffers */
+    float *d_dy, *d_y_scan, *d_du, *d_u_raw, *d_dt_raw, *d_ddt_raw, *d_ddt, *d_dA_tmp;
+    float *d_B_exp, *d_C_exp, *d_dB_scan, *d_dC_scan, *d_ddt_scan, *d_dlambda, *d_dlambda_raw;
+    cudaMalloc((void**)&d_dy, L * D * sizeof(float));
+    cudaMalloc((void**)&d_y_scan, L * R * sizeof(float));
+    cudaMalloc((void**)&d_du, L * R * sizeof(float));
+    cudaMalloc((void**)&d_u_raw, L * R * sizeof(float));
+    cudaMalloc((void**)&d_dt_raw, L * sizeof(float));
+    cudaMalloc((void**)&d_ddt_raw, L * sizeof(float));
+    cudaMalloc((void**)&d_ddt, L * sizeof(float));
+    cudaMalloc((void**)&d_dA_tmp, N * sizeof(float));
+    cudaMalloc((void**)&d_B_exp, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_C_exp, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_dB_scan, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_dC_scan, L * NR * sizeof(float));
+    cudaMalloc((void**)&d_ddt_scan, L * N * sizeof(float));
+    cudaMalloc((void**)&d_dlambda, L * sizeof(float));
+    cudaMalloc((void**)&d_dlambda_raw, L * sizeof(float));
+
+    /* Copy d_doutput to d_dy */
+    cudaMemcpy(d_dy, d_doutput, L * D * sizeof(float), cudaMemcpyDeviceToDevice);
+
+    /* Allocate GPU buffers for gradients */
+    float *d_g_W_in = gpu_param_alloc(s->g_W_in, R * D);  /* Will be overwritten */
+    float *d_g_W_out = gpu_param_alloc(s->g_W_out, D * R);
+    float *d_g_A_log = gpu_param_alloc(s->g_A_log, N);
+    float *d_g_W_B = gpu_param_alloc(s->g_W_B, NR * D);
+    float *d_g_W_C = gpu_param_alloc(s->g_W_C, NR * D);
+    float *d_g_delta_proj = gpu_param_alloc(s->g_delta_proj, D);
+    float *d_g_theta = s->g_theta ? gpu_param_alloc(s->g_theta, TS) : NULL;
+    float *d_g_lambda_proj = gpu_param_alloc(s->g_lambda_proj, D);
+
+    /* Zero GPU gradients */
+    cudaMemset(d_g_W_in, 0, R * D * sizeof(float));
+    cudaMemset(d_g_W_out, 0, D * R * sizeof(float));
+    cudaMemset(d_g_A_log, 0, N * sizeof(float));
+    cudaMemset(d_g_W_B, 0, NR * D * sizeof(float));
+    cudaMemset(d_g_W_C, 0, NR * D * sizeof(float));
+    cudaMemset(d_g_delta_proj, 0, D * sizeof(float));
+    if (d_g_theta) cudaMemset(d_g_theta, 0, TS * sizeof(float));
+    cudaMemset(d_g_lambda_proj, 0, D * sizeof(float));
+
+    cuda_block_backward(handle, d_W_in, d_W_out, d_A_log, d_W_B, d_W_C, d_delta_proj, d_theta,
+                        d_lambda_proj, d_x, d_dy, d_g_W_in, d_g_W_out, d_g_A_log,
+                        d_g_W_B, d_g_W_C, d_g_delta_proj, d_g_theta, d_g_lambda_proj,
+                        d_u_raw, d_du, d_dt_raw, d_ddt, d_B_exp, d_C_exp, NULL,
+                        d_y_scan, d_dB_scan, d_dC_scan, d_ddt_scan, d_dA_tmp, d_dlambda,
+                        d_dlambda_raw, L, (int)N, (int)D, (int)R);
+
+    /* Copy gradients back to CPU and accumulate */
+    float *h_g_W_in = (float *)malloc(R * D * sizeof(float));
+    float *h_g_W_out = (float *)malloc(D * R * sizeof(float));
+    float *h_g_A_log = (float *)malloc(N * sizeof(float));
+    float *h_g_W_B = (float *)malloc(NR * D * sizeof(float));
+    float *h_g_W_C = (float *)malloc(NR * D * sizeof(float));
+    float *h_g_delta_proj = (float *)malloc(D * sizeof(float));
+    float *h_g_theta = s->g_theta ? (float *)malloc(TS * sizeof(float)) : NULL;
+    float *h_g_lambda_proj = (float *)malloc(D * sizeof(float));
+
+    cudaMemcpy(h_g_W_in, d_g_W_in, R * D * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_W_out, d_g_W_out, D * R * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_A_log, d_g_A_log, N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_W_B, d_g_W_B, NR * D * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_W_C, d_g_W_C, NR * D * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_delta_proj, d_g_delta_proj, D * sizeof(float), cudaMemcpyDeviceToHost);
+    if (h_g_theta) cudaMemcpy(h_g_theta, d_g_theta, TS * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_g_lambda_proj, d_g_lambda_proj, D * sizeof(float), cudaMemcpyDeviceToHost);
+
+    /* Accumulate */
+    for (size_t i = 0; i < R * D; i++) s->g_W_in[i] += h_g_W_in[i];
+    for (size_t i = 0; i < D * R; i++) s->g_W_out[i] += h_g_W_out[i];
+    for (size_t i = 0; i < N; i++) s->g_A_log[i] += h_g_A_log[i];
+    for (size_t i = 0; i < NR * D; i++) s->g_W_B[i] += h_g_W_B[i];
+    for (size_t i = 0; i < NR * D; i++) s->g_W_C[i] += h_g_W_C[i];
+    for (size_t i = 0; i < D; i++) s->g_delta_proj[i] += h_g_delta_proj[i];
+    if (s->g_theta && h_g_theta) for (size_t i = 0; i < TS; i++) s->g_theta[i] += h_g_theta[i];
+    for (size_t i = 0; i < D; i++) s->g_lambda_proj[i] += h_g_lambda_proj[i];
+
+    /* Free CPU temp */
+    free(h_g_W_in); free(h_g_W_out); free(h_g_A_log); free(h_g_W_B); free(h_g_W_C);
+    free(h_g_delta_proj); free(h_g_lambda_proj);
+    if (h_g_theta) free(h_g_theta);
+
+    /* Free GPU gradients */
+    cudaFree(d_g_W_in); cudaFree(d_g_W_out); cudaFree(d_g_A_log);
+    cudaFree(d_g_W_B); cudaFree(d_g_W_C); cudaFree(d_g_delta_proj);
+    if (d_g_theta) cudaFree(d_g_theta);
+    cudaFree(d_g_lambda_proj);
+
+    /* Copy d_dy back to d_doutput for next layer */
+    cudaMemcpy(d_doutput, d_dy, L * D * sizeof(float), cudaMemcpyDeviceToDevice);
+
+    /* Free params */
+    cudaFree(d_W_in); cudaFree(d_W_out); cudaFree(d_A_log);
+    cudaFree(d_W_B); cudaFree(d_W_C); cudaFree(d_delta_proj);
+    if (d_theta) cudaFree(d_theta);
+    cudaFree(d_lambda_proj);
+
+    /* Free temp buffers */
+    cudaFree(d_dy); cudaFree(d_y_scan); cudaFree(d_du); cudaFree(d_u_raw);
+    cudaFree(d_dt_raw); cudaFree(d_ddt_raw); cudaFree(d_ddt); cudaFree(d_dA_tmp);
+    cudaFree(d_B_exp); cudaFree(d_C_exp);
+    cudaFree(d_dB_scan); cudaFree(d_dC_scan); cudaFree(d_ddt_scan);
+    cudaFree(d_dlambda); cudaFree(d_dlambda_raw);
+}
+#endif
+
+float kmamba_train_batch_hybrid(KMamba *m, const uint32_t *batch_tokens, size_t batch_size) {
+#ifdef KMAMBA_BUILD_CUDA
+    if (!m || !batch_tokens || !m->for_training || batch_size == 0) return NAN;
+    if (!m->gpu.gpu_ready && kmamba_gpu_init(m) != 0) return NAN;
+
+    size_t V = m->cfg.vocab_size;
+    size_t L = m->cfg.seq_len;
+    size_t D = m->cfg.dim;
+    size_t Lp1 = L + 1;
+    size_t n_layers = m->cfg.n_layers;
+    float invB = 1.0f / (float)batch_size;
+    float invL = 1.0f / (float)L;
+
+    /* Initialize cuBLAS handle explicitly before training */
+    cublasHandle_t handle = get_cublas_handle();
+    if (!handle) {
+        fprintf(stderr, "[ERROR] Failed to initialize cuBLAS handle\n");
+        return NAN;
+    }
+
+    /* Allocate device buffers once */
+    float *d_acts = NULL, *d_logits = NULL, *d_hidden = NULL;
+    cudaMalloc((void**)&d_acts, (n_layers + 1) * L * D * sizeof(float));
+    cudaMalloc((void**)&d_logits, L * V * sizeof(float));
+    cudaMalloc((void**)&d_hidden, L * D * sizeof(float));
+
+    /* Gradient accumulators on CPU */
+    float *g_head = (float *)xcalloc(D * V, sizeof(float));
+    float *g_embed = (float *)xcalloc(V * D, sizeof(float));
+
+    float total_loss = 0.0f;
+
+    for (size_t b = 0; b < batch_size; b++) {
+        const uint32_t *seq = &batch_tokens[b * Lp1];
+        const uint32_t *tok_in = seq;
+        const uint32_t *tok_tgt = seq + 1;
+
+        /* 1. Embedding lookup on CPU */
+        float *h_embed = (float *)malloc(L * D * sizeof(float));
+        for (size_t t = 0; t < L; t++) {
+            memcpy(&h_embed[t * D], &m->embedding[(size_t)tok_in[t] * D], D * sizeof(float));
+        }
+
+        /* 2. Upload to GPU */
+        cudaMemcpy(d_acts, h_embed, L * D * sizeof(float), cudaMemcpyHostToDevice);
+        free(h_embed);
+
+        /* 3. Forward blocks on GPU */
+        for (size_t i = 0; i < n_layers; i++) {
+            hybrid_block_forward(m->layers[i], d_acts + (i + 1) * L * D,
+                              d_acts + i * L * D, L, 1);
+        }
+
+        /* 4. Download hidden for head computation on CPU */
+        float *h_hidden = (float *)malloc(L * D * sizeof(float));
+        cudaMemcpy(h_hidden, d_acts + n_layers * L * D, L * D * sizeof(float),
+                   cudaMemcpyDeviceToHost);
+
+        /* 5. Head GEMM on CPU */
+        float *h_logits = (float *)malloc(L * V * sizeof(float));
+        gemm_f32(h_hidden, m->head, h_logits, (int)L, (int)D, (int)V);
+
+        /* 6. Loss and dlogits on CPU */
+        float *h_dlogits = (float *)calloc(L * V, sizeof(float));
+        float sample_loss = 0.0f;
+        float *probs = (float *)malloc(V * sizeof(float));
+        for (size_t t = 0; t < L; t++) {
+            softmax_f32(&h_logits[t * V], probs, 1, (int)V);
+            float p = probs[(size_t)tok_tgt[t]];
+            if (p < 1e-20f) p = 1e-20f;
+            sample_loss += -logf(p);
+            for (size_t i = 0; i < V; i++) h_dlogits[t * V + i] = probs[i] * invB * invL;
+            h_dlogits[t * V + (size_t)tok_tgt[t]] -= invB * invL;
+        }
+        free(probs);
+        total_loss += sample_loss * invL;
+
+        /* 7. d_hidden = dlogits @ head^T on CPU */
+        float *h_dhidden = (float *)malloc(L * D * sizeof(float));
+        gemm_f32_ABt(h_dlogits, m->head, h_dhidden, (int)L, (int)D, (int)V);
+
+        /* 8. g_head += hidden^T @ dlogits on CPU */
+        gemm_f32_AtB(h_hidden, h_dlogits, g_head, (int)D, (int)V, (int)L);
+
+        /* 9. Upload d_hidden to GPU for backward */
+        cudaMemcpy(d_hidden, h_dhidden, L * D * sizeof(float), cudaMemcpyHostToDevice);
+        free(h_hidden); free(h_logits); free(h_dlogits); free(h_dhidden);
+
+        /* 10. Backward blocks on GPU */
+        float *d_dhidden = d_hidden;
+        for (size_t li = n_layers; li-- > 0;) {
+            float *d_dprev = (li == 0) ? NULL : d_dhidden;
+            hybrid_block_backward(m->layers[li], d_dhidden, d_dprev,
+                               d_acts + li * L * D, L, 1);
+        }
+
+        /* 11. Download d_embedding for this sample */
+        float *h_dembed = (float *)malloc(L * D * sizeof(float));
+        cudaMemcpy(h_dembed, d_dhidden, L * D * sizeof(float), cudaMemcpyDeviceToHost);
+
+        /* 12. Accumulate embedding gradient */
+        for (size_t t = 0; t < L; t++) {
+            uint32_t tok = tok_in[t];
+            for (size_t i = 0; i < D; i++) {
+                g_embed[tok * D + i] += h_dembed[t * D + i];
+            }
+        }
+        free(h_dembed);
+    }
+
+    /* Apply gradients with optimizer */
+    kmamba_update_lr(m, m->opt_blocks.lr, m->lr_embed_head);
+
+    /* Zero grads, apply, and clip */
+    for (size_t i = 0; i < n_layers; i++) {
+        gpu_optimizer_step(m->layers[i], &m->opt_blocks);
+    }
+
+    /* Sync embeddings and head to GPU */
+    cudaMemcpy(m->gpu.d_embedding, m->embedding, V * D * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(m->gpu.d_head, m->head, D * V * sizeof(float), cudaMemcpyHostToDevice);
+
+    /* Cleanup */
+    cudaFree(d_acts); cudaFree(d_logits); cudaFree(d_hidden);
+    free(g_head); free(g_embed);
+
+    return total_loss * invB;
+#else
+    (void)m; (void)batch_tokens; (void)batch_size;
+    return NAN;
+#endif
+}
+
 #endif /* KMAMBA_BUILD_CUDA */
+
+/* ============================================================
+ * Training state getters (for CSV logging)
+ * ============================================================ */
+
+float kmamba_last_grad_norm(const KMamba *m) {
+    return m ? m->last_grad_norm : 0.0f;
+}
+
+float kmamba_last_grad_over_clip(const KMamba *m) {
+    return m ? m->last_grad_over_clip : 0.0f;
+}
+
+int kmamba_last_grad_would_clip(const KMamba *m) {
+    return m ? m->last_grad_would_clip : 0;
+}
+
+size_t kmamba_step_count(const KMamba *m) {
+    return m ? m->step_embed_head : 0;
+}
+
+/* Update learning rates (for LR scheduler) */
+void kmamba_update_lr(KMamba *m, float lr_blocks, float lr_embed) {
+    if (!m) return;
+    m->opt_blocks.lr = lr_blocks;
+    m->lr_embed_head = lr_embed;
+}

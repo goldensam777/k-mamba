@@ -157,7 +157,7 @@ typedef struct {
  * KMamba Configuration
  * ============================================================================ */
 typedef struct {
-    size_t vocab_size;   /* default: 256 (byte-level) */
+    size_t vocab_size;   /* default: 32768 (BPE tokenizer) */
     size_t dim;          /* model dimension */
     size_t state_size;   /* mamba state size (N) */
     size_t seq_len;      /* context length */
@@ -177,6 +177,9 @@ typedef struct {
     int    use_convnd;     /* 0 = disable, 1 = enable ConvND locale */
     long   convnd_K;       /* Conv kernel_size (K>=1), distinct du state_size */
     long   convnd_ndims;   /* 0 => dérivé de spatial_ndims ; sinon doit matcher */
+    
+    /* Weight tying: share embedding with output head (saves VRAM) */
+    int    weight_tying;   /* 1 = tie weights, 0 = separate matrices */
 } KMambaConfig;
 
 typedef struct {
@@ -290,12 +293,31 @@ KMamba* kmamba_load(const char *path, int for_training,
                             float lr_embed_head, float weight_decay);
 
 /* Inference: tokens length must equal cfg.seq_len. logits_out: [seq_len, vocab_size]. */
-int kmamba_forward(KMamba *m, const uint8_t *tokens, float *logits_out);
+int kmamba_forward(KMamba *m, const uint32_t *tokens, float *logits_out);
 
 /* One training step on one sequence. */
-float kmamba_train_step(KMamba *m, const uint8_t *tokens_plus1);
+float kmamba_train_step(KMamba *m, const uint32_t *tokens_plus1);
 
 /* Batch training: B sequences of (seq_len+1) bytes each. Returns mean loss. */
-float kmamba_train_batch(KMamba *m, const uint8_t *batch_tokens, size_t batch_size);
+float kmamba_train_batch(KMamba *m, const uint32_t *batch_tokens, size_t batch_size);
+
+/* Hybrid batch training: embedding/head on CPU, blocks on GPU. Returns mean loss. */
+float kmamba_train_batch_hybrid(KMamba *m, const uint32_t *batch_tokens, size_t batch_size);
+
+/* Tokenizer FFI interface (from Rust) */
+extern uint32_t* kmamba_encode(const char* text, size_t* out_len);
+extern char* kmamba_decode(const uint32_t* tokens, size_t len);
+extern void kmamba_free_tokens(uint32_t* tokens, size_t len);
+extern void kmamba_free_string(char* text);
+extern size_t kmamba_vocab_size(void);
+
+/* Training state getters (for CSV logging) */
+float kmamba_last_grad_norm(const KMamba *m);
+float kmamba_last_grad_over_clip(const KMamba *m);
+int   kmamba_last_grad_would_clip(const KMamba *m);
+size_t kmamba_step_count(const KMamba *m);
+
+/* Update learning rates (for LR scheduler) */
+void kmamba_update_lr(KMamba *m, float lr_blocks, float lr_embed);
 
 #endif /* KMAMBA_H */
