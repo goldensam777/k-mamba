@@ -73,7 +73,7 @@ static void gemm_at(cublasHandle_t h, int M, int N, int K,
 
 /* ── Kernels elementwise ──────────────────────────────────────── */
 
-__global__ void silu_fwd_kernel(const float *x, float *y, int n) {
+__global__ void cuda_silu_fwd_kernel(const float *x, float *y, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     float v = x[i];
@@ -82,7 +82,7 @@ __global__ void silu_fwd_kernel(const float *x, float *y, int n) {
 
 /* dy_dx = silu'(x_raw) = sigmoid(x) * (1 + x*(1-sigmoid(x)))
  * dx = du * dy_dx  */
-__global__ void silu_bwd_kernel(const float *du, const float *x_raw,
+__global__ void cuda_silu_bwd_kernel(const float *du, const float *x_raw,
                                 float *dx, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
@@ -95,7 +95,7 @@ __global__ void silu_bwd_kernel(const float *du, const float *x_raw,
 #define DT_MIN 1e-3f
 #define DT_MAX 0.1f
 
-__global__ void softplus_clamp_fwd_kernel(const float *x, float *y, int n) {
+__global__ void cuda_softplus_clamp_fwd_kernel(const float *x, float *y, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     float v = x[i];
@@ -104,7 +104,7 @@ __global__ void softplus_clamp_fwd_kernel(const float *x, float *y, int n) {
 }
 
 /* Backward du softplus clampé : ddt_raw = ddt * sigmoid(x) si dans [min,max] */
-__global__ void softplus_clamp_bwd_kernel(const float *ddt, const float *x_raw,
+__global__ void cuda_softplus_clamp_bwd_kernel(const float *ddt, const float *x_raw,
                                           const float *dt, float *ddt_raw, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
@@ -118,21 +118,21 @@ __global__ void softplus_clamp_bwd_kernel(const float *ddt, const float *x_raw,
 }
 
 /* Broadcast vec [D] -> out [L, D] : out[t, d] = vec[d] */
-__global__ void broadcast_d_to_ld(const float *vec, float *out, int L, int D) {
+__global__ void cuda_broadcast_d_to_ld(const float *vec, float *out, int L, int D) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= L * D) return;
     out[idx] = vec[idx % D];
 }
 
 /* Broadcast scalar_per_pos [L] -> out [L, D] : out[t, d] = scalar[t] */
-__global__ void broadcast_l_to_ld(const float *scalar, float *out, int L, int D) {
+__global__ void cuda_broadcast_l_to_ld(const float *scalar, float *out, int L, int D) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= L * D) return;
     out[idx] = scalar[idx / D];
 }
 
 /* Réduction [L, D] -> [D] : out[d] = sum_t in[t, d] (accumule avec +=) */
-__global__ void reduce_sum_L(const float *in, float *out, int L, int D) {
+__global__ void cuda_reduce_sum_L(const float *in, float *out, int L, int D) {
     int d = blockIdx.x * blockDim.x + threadIdx.x;
     if (d >= D) return;
     float acc = 0.0f;
@@ -141,7 +141,7 @@ __global__ void reduce_sum_L(const float *in, float *out, int L, int D) {
 }
 
 /* Réduction [L, D] -> [L] : out[t] = sum_d in[t, d] */
-__global__ void reduce_sum_D(const float *in, float *out, int L, int D) {
+__global__ void cuda_reduce_sum_D(const float *in, float *out, int L, int D) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= L) return;
     float acc = 0.0f;
@@ -150,14 +150,14 @@ __global__ void reduce_sum_D(const float *in, float *out, int L, int D) {
 }
 
 /* y += x (accumulation résiduelle) */
-__global__ void add_inplace_kernel(float *y, const float *x, int n) {
+__global__ void cuda_add_inplace_kernel(float *y, const float *x, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     y[i] += x[i];
 }
 
 /* Sigmoid : y[i] = 1 / (1 + exp(-x[i])) */
-__global__ void sigmoid_fwd_kernel(const float *x, float *y, int n) {
+__global__ void cuda_sigmoid_fwd_kernel(const float *x, float *y, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     float v = x[i];
@@ -165,14 +165,14 @@ __global__ void sigmoid_fwd_kernel(const float *x, float *y, int n) {
 }
 
 /* Sigmoid backward : dx = dy * sigma * (1 - sigma) */
-__global__ void sigmoid_bwd_kernel(const float *dy, const float *y, float *dx, int n) {
+__global__ void cuda_sigmoid_bwd_kernel(const float *dy, const float *y, float *dx, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
     dx[i] = dy[i] * y[i] * (1.0f - y[i]);
 }
 
 /* dx[L, dim] += ddt[L] outer delta_proj[dim] : dx[t,d] += ddt[t]*dproj[d] */
-__global__ void outer_add_kernel(float *dx, const float *ddt,
+__global__ void cuda_outer_add_kernel(float *dx, const float *ddt,
                                  const float *dproj, int L, int D) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= L * D) return;
@@ -194,7 +194,7 @@ __global__ void outer_add_kernel(float *dx, const float *ddt,
  * h_store[t*D + d] = h_t[d]
  * y_scan [t*D + d] = C_t[d] * h_t[d]
  */
-__global__ void complex_ssm_fwd_kernel(
+__global__ void cuda_ssm_fwd_kernel(
     const float *u,       /* [L, D] input (post-SiLU) */
     const float *A_log,   /* [D] */
     const float *B_exp,   /* [L, D] data-dep B */
@@ -262,7 +262,7 @@ __global__ void complex_ssm_fwd_kernel(
 #define SSM_PARALLEL_THREADS 256
 #define SSM_PARALLEL_ITEMS_PER_THREAD 4
 
-__global__ void complex_ssm_fwd_parallel_kernel(
+__global__ void cuda_ssm_fwd_parallel_kernel(
     const float *u,       /* [L, D] input (post-SiLU) */
     const float *A_log,   /* [D] */
     const float *B_exp,   /* [L, D] data-dep B */
@@ -360,7 +360,7 @@ __global__ void complex_ssm_fwd_parallel_kernel(
     }
 }
 
-extern "C" void gpu_block_forward(
+extern "C" void cuda_block_forward(
     cublasHandle_t cublas,
     /* Paramètres du bloc [VRAM] */
     const float *d_W_in,        /* [R, dim]      — MIMO: R=mimo_rank, R=1 for SISO */
@@ -382,6 +382,20 @@ extern "C" void gpu_block_forward(
     float *d_lambda_raw, float *d_lambda,  /* [L] workspace for lambda */
     int L, int state, int dim, int R)  /* R = mimo_rank (1 = SISO) */
 {
+    if (!cublas) {
+        fprintf(stderr, "[ERROR] cuda_block_forward: cublas handle is NULL\n");
+        return;
+    }
+    /* Verify pointers are device pointers */
+    cudaPointerAttributes attr;
+    cudaError_t err = cudaPointerGetAttributes(&attr, d_x);
+    if (err != cudaSuccess || attr.type != cudaMemoryTypeDevice) {
+        fprintf(stderr, "[ERROR] d_x is not a device pointer (err=%d, type=%d)\n", (int)err, (int)attr.type);
+    }
+    err = cudaPointerGetAttributes(&attr, d_W_in);
+    if (err != cudaSuccess || attr.type != cudaMemoryTypeDevice) {
+        fprintf(stderr, "[ERROR] d_W_in is not a device pointer (err=%d, type=%d)\n", (int)err, (int)attr.type);
+    }
     const float a1 = 1.0f, b0 = 0.0f;
     int NR = state * R;
     int blk;
@@ -391,12 +405,12 @@ extern "C" void gpu_block_forward(
 
     /* 2. SiLU */
     blk = (L * R + 255) / 256;
-    silu_fwd_kernel<<<blk, 256>>>(d_u_raw, d_u, L * R);
+    cuda_silu_fwd_kernel<<<blk, 256>>>(d_u_raw, d_u, L * R);
 
     /* 3. delta : dt_raw [L] = x [L, dim] @ delta_proj [dim] */
     gemm(cublas, L, 1, dim, a1, d_x, d_delta_proj, b0, d_dt_raw);
     blk = (L + 255) / 256;
-    softplus_clamp_fwd_kernel<<<blk, 256>>>(d_dt_raw, d_dt, L);
+    cuda_softplus_clamp_fwd_kernel<<<blk, 256>>>(d_dt_raw, d_dt, L);
 
     /* 4. Data-dependent B [L, N*R], C [L, N*R], lambda [L] */
     gemm_bt(cublas, L, NR, dim, a1, d_x, d_W_B, b0, d_B_exp);
@@ -404,7 +418,7 @@ extern "C" void gpu_block_forward(
     /* lambda_raw [L] = x [L,dim] @ lambda_proj [dim] */
     gemm(cublas, L, 1, dim, a1, d_x, d_lambda_proj, b0, d_lambda_raw);
     { int blk_l = (L + 255) / 256;
-      sigmoid_fwd_kernel<<<blk_l, 256>>>(d_lambda_raw, d_lambda, L); }
+      cuda_sigmoid_fwd_kernel<<<blk_l, 256>>>(d_lambda_raw, d_lambda, L); }
 
     /* 5. Complex SSM parallel scan with R(θ) rotation + exp-trapezoidal
      * Each thread block handles one state dimension pair (2k, 2k+1).
@@ -413,7 +427,7 @@ extern "C" void gpu_block_forward(
     CUDA_CHECK(cudaMemset(d_y_scan,  0, L * R * sizeof(float)));
     /* Number of blocks = ceil(state / 2) for handling pairs + possibly one single */
     int num_pairs = (state + 1) / 2;
-    complex_ssm_fwd_parallel_kernel<<<num_pairs, SSM_PARALLEL_THREADS>>>(
+    cuda_ssm_fwd_parallel_kernel<<<num_pairs, SSM_PARALLEL_THREADS>>>(
         d_u, d_A_log, d_B_exp, d_C_exp, d_dt,
         d_theta, d_lambda, d_h_store, d_y_scan, L, state);
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -425,7 +439,7 @@ extern "C" void gpu_block_forward(
     CUDA_CHECK(cudaMemcpy(d_y, d_y_proj, L * dim * sizeof(float),
                           cudaMemcpyDeviceToDevice));
     blk = (L * dim + 255) / 256;
-    add_inplace_kernel<<<blk, 256>>>(d_y, d_x, L * dim);
+    cuda_add_inplace_kernel<<<blk, 256>>>(d_y, d_x, L * dim);
     /* Note: d_dt_exp is no longer used (kept for API compatibility) */
     (void)d_dt_exp;
 }
@@ -453,7 +467,7 @@ extern "C" void gpu_block_forward(
  *   d_g_theta[D/2]:  gradient w.r.t. theta (accumulated)
  *   d_ddy_adj[L, D]: adjoint of y_scan passed down (= d_du_scan)
  */
-__global__ void complex_ssm_bwd_kernel(
+__global__ void cuda_ssm_bwd_kernel(
     const float *d_dy_scan,  /* [L, D] upstream gradient of y_scan */
     const float *u,          /* [L, D] */
     const float *A_log,      /* [D] */
@@ -569,7 +583,7 @@ __global__ void complex_ssm_bwd_kernel(
  * This version uses thread-per-timestep processing within chunks, similar to
  * the forward kernel but processing in reverse.
  */
-__global__ void complex_ssm_bwd_parallel_kernel(
+__global__ void cuda_ssm_bwd_parallel_kernel(
     const float *d_dy_scan,  /* [L, D] upstream gradient */
     const float *u,          /* [L, D] */
     const float *A_log,      /* [D] */
@@ -713,7 +727,7 @@ __global__ void complex_ssm_bwd_parallel_kernel(
     if (d_g_theta && d1 < D) atomicAdd(&d_g_theta[pair_idx], local_dtheta);
 }
 
-extern "C" void gpu_block_backward(
+extern "C" void cuda_block_backward(
     cublasHandle_t cublas,
     /* Paramètres (lecture seule) */
     const float *d_W_in, const float *d_W_out,   /* [R,dim] / [dim,R] */
@@ -777,7 +791,7 @@ extern "C" void gpu_block_backward(
 
     /* Number of blocks = ceil(state / 2) for handling pairs */
     int num_pairs_bwd = (state + 1) / 2;
-    complex_ssm_bwd_parallel_kernel<<<num_pairs_bwd, SSM_PARALLEL_THREADS>>>(
+    cuda_ssm_bwd_parallel_kernel<<<num_pairs_bwd, SSM_PARALLEL_THREADS>>>(
         d_dy_scan,
         d_u, d_A_log, d_B_exp, d_C_exp, d_dt, d_lambda, d_theta, d_h_store,
         d_du, d_dA_tmp, d_dB_scan, d_dC_scan, d_ddt_scan, d_g_theta, d_dlambda,
@@ -786,7 +800,7 @@ extern "C" void gpu_block_backward(
 
     /* Accumule dA_log */
     blk = (state + 255) / 256;
-    add_inplace_kernel<<<blk, 256>>>(d_dA_log, d_dA_tmp, state);
+    cuda_add_inplace_kernel<<<blk, 256>>>(d_dA_log, d_dA_tmp, state);
 
     /* g_W_B [N*R, dim] += dB_scan^T [N*R, L] @ x [L, dim] */
     gemm_at(cublas, NR, dim, L, a1, d_dB_scan, d_x, a1, d_dW_B);
@@ -796,30 +810,86 @@ extern "C" void gpu_block_backward(
 
     /* ddt [L] = sum_d ddt_scan [t, d] */
     blk = (L + 255) / 256;
-    reduce_sum_D<<<blk, 256>>>(d_ddt_scan, d_ddt, L, state);
+    cuda_reduce_sum_D<<<blk, 256>>>(d_ddt_scan, d_ddt, L, state);
 
     /* ── Backward softplus ──────────────────────────────────────── */
-    softplus_clamp_bwd_kernel<<<blk, 256>>>(d_ddt, d_dt_raw, d_dt, d_ddt_raw, L);
+    cuda_softplus_clamp_bwd_kernel<<<blk, 256>>>(d_ddt, d_dt_raw, d_dt, d_ddt_raw, L);
 
     /* ── Backward delta_proj ────────────────────────────────────── */
     gemm_at(cublas, 1, dim, L, a1, d_ddt_raw, d_x, a1, d_ddelta_proj);
     blk = (L * dim + 255) / 256;
-    outer_add_kernel<<<blk, 256>>>(d_dx, d_ddt_raw, d_delta_proj, L, dim);
+    cuda_outer_add_kernel<<<blk, 256>>>(d_dx, d_ddt_raw, d_delta_proj, L, dim);
 
     /* ── Backward SiLU + in_proj (W_in=[R,dim], u=[L,R]) ──────── */
     blk = (L * R + 255) / 256;
-    silu_bwd_kernel<<<blk, 256>>>(d_du, d_u_raw, d_du_raw, L * R);
+    cuda_silu_bwd_kernel<<<blk, 256>>>(d_du, d_u_raw, d_du_raw, L * R);
 
     gemm_at(cublas, R, dim, L, a1, d_du_raw, d_x, a1, d_dW_in);
     gemm(cublas, L, dim, R, a1, d_du_raw, d_W_in, a1, d_dx);
 
     /* ── Backward lambda_proj ───────────────────────────────────── */
     blk = (L + 255) / 256;
-    sigmoid_bwd_kernel<<<blk, 256>>>(d_dlambda, d_lambda, d_dlambda_raw, L);
+    cuda_sigmoid_bwd_kernel<<<blk, 256>>>(d_dlambda, d_lambda, d_dlambda_raw, L);
     gemm_at(cublas, 1, dim, L, a1, d_dlambda_raw, d_x, a1, d_g_lambda_proj);
-    outer_add_kernel<<<(L * dim + 255) / 256, 256>>>(
+    cuda_outer_add_kernel<<<(L * dim + 255) / 256, 256>>>(
         d_dx, d_dlambda_raw, d_lambda_proj, L, dim);
 
     /* API compat */
     (void)d_dt_exp;
+}
+
+/* ============================================================
+ * GPU Optimizer Step (Hybrid support)
+ * Download gradients, apply CPU optimizer, upload updated params
+ * ============================================================ */
+#include "kmamba.h"
+#include "kmamba_kernels.h"
+
+extern "C" void gpu_optimizer_step(MambaBlock *block, const MBOptimConfig *conf) {
+    if (!block || !block->opt_state) return;
+    
+    /* For now: download gradients to CPU, apply optimizer, upload back */
+    /* This is a practical approach for the Hybrid model */
+    
+    size_t D = block->config.dim;
+    size_t N = block->config.state_size;
+    size_t R = block->config.mimo_rank > 0 ? block->config.mimo_rank : 1;
+    size_t NR = N * R;
+    size_t TS = D / 2;
+    
+    MBOptimState *s = (MBOptimState *)block->opt_state;
+    s->step++;
+    
+    /* Helper to download gradient, apply adamw/muon, upload param */
+    auto step_param = [&](float *param, float *grad, float *m, float *v, size_t n) {
+        if (!param || !grad || !m || !v || n == 0) return;
+        
+        /* Allocate CPU buffer for gradient */
+        float *h_grad = (float *)malloc(n * sizeof(float));
+        if (!h_grad) return;
+        
+        /* Download gradient from GPU */
+        cudaMemcpy(h_grad, grad, n * sizeof(float), cudaMemcpyDeviceToHost);
+        
+        /* Apply AdamW step on CPU */
+        adamw_step_f32(param, h_grad, m, v, conf->lr, 0.9f, 0.999f, conf->eps, 
+                       conf->weight_decay, (int)n, s->step);
+        
+        /* Upload updated param to GPU */
+        cudaMemcpy(param, param, n * sizeof(float), cudaMemcpyHostToDevice);
+        
+        free(h_grad);
+    };
+    
+    /* Apply to all parameters */
+    step_param(block->W_in.data,  s->g_W_in,  s->m_W_in,  s->v_W_in,  R * D);
+    step_param(block->W_out.data, s->g_W_out, s->m_W_out, s->v_W_out, D * R);
+    step_param(block->A_log.data, s->g_A_log, s->m_A_log, s->v_A_log, N);
+    step_param(block->W_B.data,   s->g_W_B,   s->m_W_B,   s->v_W_B,   NR * D);
+    step_param(block->W_C.data,   s->g_W_C,   s->m_W_C,   s->v_W_C,   NR * D);
+    step_param(block->b_B,        s->g_b_B,   s->m_b_B,   s->v_b_B,   NR);
+    step_param(block->b_C,        s->g_b_C,   s->m_b_C,   s->v_b_C,   NR);
+    step_param(block->delta_proj.data,  s->g_delta_proj,  s->m_delta_proj,  s->v_delta_proj, D);
+    step_param(block->lambda_proj.data, s->g_lambda_proj, s->m_lambda_proj, s->v_lambda_proj, D);
+    step_param(block->theta, s->g_theta, s->m_theta, s->v_theta, TS);
 }
