@@ -1,0 +1,18 @@
+[package]
+name = "kmamba-tokenizer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kmamba_tokenizer"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+tiktoken-rs = "0.6"
+parking_lot = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
