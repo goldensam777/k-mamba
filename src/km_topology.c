@@ -88,17 +88,36 @@ int km_normalize_spatial_topology(long *spatial_ndims,
                                   long convnd_K) {
     size_t total_points;
 
-    if (!spatial_ndims || !spatial_dims) return -1;
-    if (seq_len > (size_t)LONG_MAX) return -1;
+    fprintf(stderr, "[DEBUG] km_normalize_spatial_topology: spatial_ndims=%ld, seq_len=%zu\n", 
+            *spatial_ndims, seq_len);
+    fprintf(stderr, "[DEBUG] spatial_dims[0]=%ld, spatial_dims[1]=%ld\n",
+            spatial_dims[0], spatial_dims[1]);
+
+    if (!spatial_ndims || !spatial_dims) {
+        fprintf(stderr, "[DEBUG] FAIL: NULL pointers\n");
+        return -1;
+    }
+    if (seq_len > (size_t)LONG_MAX) {
+        fprintf(stderr, "[DEBUG] FAIL: seq_len too large\n");
+        return -1;
+    }
 
     if (*spatial_ndims <= 0) {
+        fprintf(stderr, "[DEBUG] Auto-setting spatial_ndims to 1\n");
         memset(spatial_dims, 0, (size_t)KMAMBA_MAX_NDIMS * sizeof(long));
         *spatial_ndims = 1;
         spatial_dims[0] = (long)seq_len;
     }
 
-    if (!km_spatial_dims_product(spatial_dims, *spatial_ndims, &total_points)) return -1;
-    if (total_points != seq_len) return -1;
+    if (!km_spatial_dims_product(spatial_dims, *spatial_ndims, &total_points)) {
+        fprintf(stderr, "[DEBUG] FAIL: km_spatial_dims_product failed\n");
+        return -1;
+    }
+    fprintf(stderr, "[DEBUG] total_points=%zu, seq_len=%zu\n", total_points, seq_len);
+    if (total_points != seq_len) {
+        fprintf(stderr, "[DEBUG] FAIL: total_points != seq_len\n");
+        return -1;
+    }
 
     if (use_convnd) {
         if (!convnd_ndims || convnd_K <= 0) return -1;

@@ -11,13 +11,13 @@
 #   make tests            # Tests unitaires
 #   make clean            # Nettoyage
 
-.PHONY: all lib models cpu_lm_model cuda_lm_model hybrid_lm_model all_models tests clean distclean
+.PHONY: all lib libso models cpu_lm_model cuda_lm_model hybrid_lm_model all_models tests clean distclean
 
 # ═══════════════════════════════════════════════════════════════
 # Compilateurs et flags
 # ═══════════════════════════════════════════════════════════════
 CC = gcc
-CFLAGS = -O3 -mavx2 -Wall -Wextra -I./include -fopenmp
+CFLAGS = -O3 -mavx2 -Wall -Wextra -I./include -fopenmp -fPIC
 LDFLAGS = -lm -lgomp
 
 # ═══════════════════════════════════════════════════════════════
@@ -42,8 +42,8 @@ endif
 
 ifeq ($(CUDA_AVAILABLE),1)
 CUDA_HOME ?= $(dir $(NVCC))..
-CUDA_FLAGS = -O3 -arch=sm_70 -I./include -I$(CUDA_HOME)/include -DKMAMBA_BUILD_CUDA
-CUDA_LDFLAGS = -L$(CUDA_HOME)/lib64 -lcudart -lcublas
+CUDA_FLAGS = -O3 -arch=sm_70 -I./include -I$(CUDA_HOME)/include -DKMAMBA_BUILD_CUDA -Xcompiler -fPIC
+CUDA_LDFLAGS = -L/usr/lib/x86_64-linux-gnu -lcudart -lcublas
 CFLAGS += -DKMAMBA_BUILD_CUDA
 endif
 
@@ -62,6 +62,8 @@ SRCS = src/kmamba.c \
        src/scan_nd.c \
        src/convnd.c \
        src/km_memory_pool.c \
+       src/scan1d_c_wrapper.c \
+       src/convnd_c_wrapper.c \
        kernels/gemm_f32.c \
        kernels/activations_f32.c \
        kernels/elementwise_f32.c \
@@ -90,6 +92,7 @@ ASM_OBJS = $(ASM_SRCS:.asm=.o)
 CUDA_OBJS = $(patsubst %.cu,cuda/%.o,$(notdir $(CUDA_SRCS)))
 
 TARGET = libkmamba.a
+SO_TARGET = libkmamba.so
 
 MODEL_CPU = models/kmamba_cpu
 MODEL_CUDA = models/kmamba_cuda
@@ -102,10 +105,15 @@ MODEL_HYBRID = models/kmamba_hybrid
 # Tout compiler
 all: lib all_models
 
-# Juste la bibliothèque
+# Juste la bibliothèque (static)
 lib: check_cuda check_rust $(RUST_LIB) $(TARGET)
 	@echo ""
 	@echo "=== libkmamba.a prête ==="
+
+# Bibliothèque partagée pour Python bindings (sans tokenizer Rust)
+libso: check_cuda $(SO_TARGET)
+	@echo ""
+	@echo "=== libkmamba.so prête pour bindings Python ==="
 
 # Tous les modèles
 models: all_models
@@ -153,13 +161,17 @@ endif
 $(TARGET): $(OBJS) $(ASM_OBJS) $(CUDA_OBJS)
 	ar rcs $@ $^
 
+# Shared library for Python bindings (sans ASM - pas compatible PIC)
+$(SO_TARGET): $(OBJS) $(CUDA_OBJS)
+	$(CC) -shared -o $@ $^ $(LDFLAGS) $(CUDA_LDFLAGS)
+
 # C files (always use gcc, not nvcc)
 %.o: %.c
 	gcc $(CFLAGS) -c $< -o $@
 
-# ASM files
+# ASM files (PIC version for shared library)
 %.o: %.asm
-	nasm -f elf64 -O3 -I./include $< -o $@
+	nasm -f elf64 -O3 -I./include -DPIC $< -o $@
 
 # CUDA files
 ifeq ($(CUDA_AVAILABLE),1)

@@ -101,7 +101,8 @@ static void embed_lookup(const KMamba *m, float *out, const uint32_t *tokens) {
 /* ========= create / free ========= */
 
 KMamba* kmamba_create(const KMambaConfig *cfg) {
-    if (!cfg || !cfg->vocab_size || !cfg->dim || !cfg->seq_len || !cfg->n_layers)
+    /* Note: vocab_size can be 0 for continuous inputs */
+    if (!cfg || !cfg->dim || !cfg->seq_len || !cfg->n_layers)
         return NULL;
 
     
@@ -120,12 +121,19 @@ KMamba* kmamba_create(const KMambaConfig *cfg) {
         return NULL;
     }
 
-    m->embedding = (float *)xcalloc(m->cfg.vocab_size * m->cfg.dim, sizeof(float));
-    /* Weight tying: head partage les poids avec embedding */
-    if (m->cfg.weight_tying) {
-        m->head = m->embedding;  /* Partage mémoire */
+    /* Allocate embedding only if vocab_size > 0 (skip for continuous inputs) */
+    if (m->cfg.vocab_size > 0) {
+        m->embedding = (float *)xcalloc(m->cfg.vocab_size * m->cfg.dim, sizeof(float));
+        /* Weight tying: head partage les poids avec embedding */
+        if (m->cfg.weight_tying) {
+            m->head = m->embedding;  /* Partage mémoire */
+        } else {
+            m->head = (float *)xcalloc(m->cfg.dim * m->cfg.vocab_size, sizeof(float));
+        }
     } else {
-        m->head = (float *)xcalloc(m->cfg.dim * m->cfg.vocab_size, sizeof(float));
+        /* Continuous inputs: no embedding/head needed */
+        m->embedding = NULL;
+        m->head = NULL;
     }
 
     m->layers = (MambaBlock **)calloc(m->cfg.n_layers, sizeof(MambaBlock *));

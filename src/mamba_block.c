@@ -506,8 +506,8 @@ void mamba_block_forward_ws(MambaBlock *block, MambaBlockWorkspace *ws, float *o
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-/* External declaration of gpu_block_forward from cuda/mamba_block.cu */
-extern void gpu_block_forward(
+/* External declaration of cuda_block_forward from cuda/mamba_block.cu */
+extern void cuda_block_forward(
     cublasHandle_t cublas,
     const float *d_W_in, const float *d_W_out, const float *d_A_log,
     const float *d_W_B, const float *d_W_C, const float *d_delta_proj,
@@ -603,7 +603,7 @@ static int _mamba_block_forward_gpu(MambaBlock *block, float *output, const floa
         cudaMemcpy(d_input, h_in, bytes_L_D, cudaMemcpyHostToDevice);
 
         /* Call GPU kernel */
-        gpu_block_forward(
+        cuda_block_forward(
             cublas_handle,
             d_W_in, d_W_out, d_A_log, d_W_B, d_W_C, d_delta_proj,
             d_theta, d_lambda_proj,
@@ -612,7 +612,7 @@ static int _mamba_block_forward_gpu(MambaBlock *block, float *output, const floa
             d_B_exp, d_C_exp, d_dt_exp,
             d_h_store, d_y_scan, d_y_proj,
             d_lambda_raw, d_lambda,
-            (int)L, (int)N, (int)D, (int)R);
+            L, N, D, R);
 
         /* Copy output */
         cudaMemcpy(h_out, d_output, bytes_L_D, cudaMemcpyDeviceToHost);
